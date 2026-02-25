@@ -135,36 +135,6 @@ export async function sendMessage(
         const data = line.slice(6).trim();
         try {
           const event = JSON.parse(data);
-          // #region agent log
-          if (
-            event.type === "thinking" ||
-            (event.type === "token" && fullText.length < 50)
-          ) {
-            fetch(
-              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Debug-Session-Id": "fc5e63",
-                },
-                body: JSON.stringify({
-                  sessionId: "fc5e63",
-                  location: "claudeClient.ts:sse",
-                  message: "SSE event received",
-                  data: {
-                    type: event.type,
-                    textLen: event.text?.length,
-                    textSnippet: event.text?.slice(0, 80),
-                    fullTextLen: fullText.length,
-                  },
-                  timestamp: Date.now(),
-                  hypothesisId: "H7",
-                }),
-              },
-            ).catch(() => {});
-          }
-          // #endregion
           if (event.type === "token") {
             fullText += event.text;
             callbacks.onToken(event.text);

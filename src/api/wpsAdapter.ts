@@ -23,35 +23,6 @@ export async function getWpsContext(): Promise<WpsContext> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "c43a5a",
-      },
-      body: JSON.stringify({
-        sessionId: "c43a5a",
-        location: "wpsAdapter.ts:getWpsContext",
-        message: "Proxy response received",
-        data: {
-          workbookName: data.workbookName,
-          sheetNamesLen: data.sheetNames?.length,
-          hasSelection: !!data.selection,
-          hasError: !!data.error,
-          errorMsg: data.error,
-          timestamp: data.timestamp,
-          willMock: !!(
-            data.error ||
-            (!data.workbookName && !data.selection && !data.sheetNames?.length)
-          ),
-        },
-        timestamp: Date.now(),
-        hypothesisId: "E",
-      }),
-    }).catch(() => {});
-    // #endregion
-
     if (
       data.error ||
       (!data.workbookName && !data.selection && !data.sheetNames?.length)
@@ -68,23 +39,6 @@ export async function getWpsContext(): Promise<WpsContext> {
       usedRange: data.usedRange ?? null,
     };
   } catch (err) {
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "c43a5a",
-      },
-      body: JSON.stringify({
-        sessionId: "c43a5a",
-        location: "wpsAdapter.ts:getWpsContext:catch",
-        message: "Fetch failed",
-        data: { error: String(err) },
-        timestamp: Date.now(),
-        hypothesisId: "D",
-      }),
-    }).catch(() => {});
-    // #endregion
     _wpsAvailable = false;
     return getMockContext();
   }
@@ -149,11 +103,6 @@ export function onSelectionChange(
         selRows: ctx.selection?.rowCount,
         selCols: ctx.selection?.colCount,
       });
-
-      // #region agent log
-      const changed = json !== _lastCtxJson;
-      fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"fc5e63"},body:JSON.stringify({sessionId:"fc5e63",location:"wpsAdapter.ts:onSelectionChange",message:"Poll result",data:{changed,selAddr:ctx.selection?.address,wbName:ctx.workbookName},timestamp:Date.now(),hypothesisId:"H4"})}).catch(()=>{});
-      // #endregion
 
       if (json !== _lastCtxJson) {
         _lastCtxJson = json;

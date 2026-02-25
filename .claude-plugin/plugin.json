@@ -1,0 +1,25 @@
+{
+  "name": "claude-wps-excel",
+  "version": "1.1.0",
+  "description": "WPS Office Excel AI 数据处理助手 — 侧边栏对话式操作表格",
+  "author": {
+    "name": "claude-office-skills",
+    "url": "https://github.com/claude-office-skills"
+  },
+  "platform": "wps-office",
+  "capabilities": [
+    "data-analysis",
+    "template-generation",
+    "chart-creation",
+    "code-execution"
+  ],
+  "skills": {
+    "bundled": [
+      "skills/bundled/wps-core-api",
+      "skills/bundled/chart-creation",
+      "skills/bundled/template-generation",
+      "skills/bundled/code-rules"
+    ]
+  },
+  "commands": "commands/"
+}

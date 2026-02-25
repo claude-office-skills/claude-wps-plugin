@@ -102,10 +102,6 @@ if (_isPluginHost) {
       usedRange: null,
     };
 
-    // #region agent log
-    var _dbgParts = [];
-    // #endregion
-
     try {
       var app = Application;
       var wb = app.ActiveWorkbook;
@@ -124,9 +120,6 @@ if (_isPluginHost) {
     try {
       ws = wb.ActiveSheet;
     } catch (e1) {
-      // #region agent log
-      _dbgParts.push("ActiveSheet-err:" + e1.message);
-      // #endregion
     }
 
     try {
@@ -138,9 +131,6 @@ if (_isPluginHost) {
         }
       }
     } catch (e2) {
-      // #region agent log
-      _dbgParts.push("Sheets-err:" + e2.message);
-      // #endregion
     }
 
     try {
@@ -158,33 +148,6 @@ if (_isPluginHost) {
         var MAX_CELLS_EXTRACT = 5000;
         var selAddr = getAddress(sel);
         var totalCells = rc * cc;
-
-        // #region agent log
-        fetch(
-          "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "fc5e63",
-            },
-            body: JSON.stringify({
-              sessionId: "fc5e63",
-              location: "main.js:readWpsContext:selection",
-              message: "Selection size check",
-              data: {
-                rc: rc,
-                cc: cc,
-                totalCells: totalCells,
-                willSkipExtract: totalCells > MAX_CELLS_EXTRACT,
-                addr: selAddr,
-              },
-              timestamp: Date.now(),
-              hypothesisId: "H1-H2",
-            }),
-          },
-        ).catch(function () {});
-        // #endregion
 
         if (totalCells > MAX_CELLS_EXTRACT) {
           result.selection = {
@@ -208,9 +171,6 @@ if (_isPluginHost) {
         }
       }
     } catch (e3) {
-      // #region agent log
-      _dbgParts.push("Selection-err:" + e3.message);
-      // #endregion
     }
 
     try {
@@ -235,16 +195,7 @@ if (_isPluginHost) {
         }
       }
     } catch (e4) {
-      // #region agent log
-      _dbgParts.push("UsedRange-err:" + e4.message);
-      // #endregion
     }
-
-    // #region agent log
-    if (_dbgParts.length > 0) {
-      result._debugErrors = _dbgParts.join("; ");
-    }
-    // #endregion
 
     return result;
   }
@@ -280,91 +231,6 @@ if (_isPluginHost) {
         var result = null;
         var error = null;
 
-        // #region agent log
-        var _diagData = {};
-        try {
-          _diagData.hasApplication = typeof Application !== "undefined";
-          _diagData.appType = typeof Application;
-          try {
-            _diagData.activeWbName = Application.ActiveWorkbook.Name;
-          } catch (de) {
-            _diagData.activeWbName = "ERR:" + de.message;
-          }
-          try {
-            _diagData.activeWbType = typeof Application.ActiveWorkbook;
-          } catch (de) {
-            _diagData.activeWbType = "ERR";
-          }
-          try {
-            _diagData.activeSheetName = Application.ActiveSheet.Name;
-          } catch (de) {
-            _diagData.activeSheetName = "ERR:" + de.message;
-          }
-          try {
-            _diagData.activeSheetType = typeof Application.ActiveSheet;
-          } catch (de) {
-            _diagData.activeSheetType = "ERR";
-          }
-          try {
-            _diagData.activeSheetHasCells =
-              typeof Application.ActiveSheet.Cells;
-          } catch (de) {
-            _diagData.activeSheetHasCells = "ERR:" + de.message;
-          }
-          try {
-            _diagData.wbActiveSheetName =
-              Application.ActiveWorkbook.ActiveSheet.Name;
-          } catch (de) {
-            _diagData.wbActiveSheetName = "ERR:" + de.message;
-          }
-          try {
-            _diagData.wbActiveSheetHasCells =
-              typeof Application.ActiveWorkbook.ActiveSheet.Cells;
-          } catch (de) {
-            _diagData.wbActiveSheetHasCells = "ERR:" + de.message;
-          }
-          try {
-            _diagData.selType = typeof Application.Selection;
-          } catch (de) {
-            _diagData.selType = "ERR";
-          }
-          try {
-            _diagData.selAddr = Application.Selection.Address();
-          } catch (de) {
-            _diagData.selAddr = "ERR:" + de.message;
-          }
-        } catch (de2) {
-          _diagData.diagError = de2.message;
-        }
-        fetch(PROXY_URL + "/code-result", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: "diag-" + id,
-            result: JSON.stringify(_diagData),
-            error: null,
-          }),
-        }).catch(function () {});
-        fetch(
-          "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "c43a5a",
-            },
-            body: JSON.stringify({
-              sessionId: "c43a5a",
-              location: "main.js:pollAndExecuteCode",
-              message: "Pre-exec diagnostics",
-              data: _diagData,
-              timestamp: Date.now(),
-              hypothesisId: "H1-H4",
-            }),
-          },
-        ).catch(function () {});
-        // #endregion
-
         try {
           var _cellHelper =
             "function __CELL(ws,r,c){" +
@@ -394,30 +260,6 @@ if (_isPluginHost) {
           }
         } catch (e) {
           error = e.message || String(e);
-          // #region agent log
-          fetch(
-            "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "c43a5a",
-              },
-              body: JSON.stringify({
-                sessionId: "c43a5a",
-                location: "main.js:exec-catch",
-                message: "Code execution error",
-                data: {
-                  id: id,
-                  error: error,
-                  codeSnippet: code.substring(0, 200),
-                },
-                timestamp: Date.now(),
-                hypothesisId: "H1-H4",
-              }),
-            },
-          ).catch(function () {});
-          // #endregion
         }
 
         fetch(PROXY_URL + "/code-result", {

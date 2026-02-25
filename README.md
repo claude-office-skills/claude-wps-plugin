@@ -4,6 +4,18 @@ WPS Office Excel AI 助手——通过自然语言对话操控表格，由 Claud
 
 ## 版本日志
 
+### v1.1.0 (2026-02-25) — Cowork 风格模块化重构
+
+**Phase 3: Skills/Commands 模块化**（借鉴 Anthropic Cowork + OpenClaw 架构）
+- 插件清单 `.claude-plugin/plugin.json` + 行为定义 `AGENTS.md`
+- SYSTEM_PROMPT 拆分为 4 个 bundled skills（`wps-core-api`、`chart-creation`、`template-generation`、`code-rules`）
+- Skill Loader：按用户输入关键词**按需匹配**加载 skill，减少 token 消耗
+- 9 个 QuickActionCards 迁移为 `commands/*.md` 文件，前端从 API 动态加载
+- 新增 API 端点：`GET /commands`、`GET /skills`
+- 三层 skill 目录：`bundled/`（内置）→ `managed/`（社区）→ `workspace/`（用户自定义）
+- 清理所有 agent debug 日志代码
+- health-check 增强：返回 skill/command 加载数量
+
 ### v1.0.0 (2026-02-25) — MVP 完整版
 
 **Phase 1: 基础架构**

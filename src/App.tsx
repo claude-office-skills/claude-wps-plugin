@@ -288,58 +288,11 @@ export default function App() {
           setLoading(false);
 
           if (codeBlocks.length > 0) {
-            // #region agent log
-            fetch(
-              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Debug-Session-Id": "fc5e63",
-                },
-                body: JSON.stringify({
-                  sessionId: "fc5e63",
-                  location: "App.tsx:autoExec",
-                  message: "Auto-exec start",
-                  data: {
-                    blockCount: codeBlocks.length,
-                    blockLangs: codeBlocks.map((b) => b.language),
-                    blockSizes: codeBlocks.map((b) => b.code.length),
-                  },
-                  timestamp: Date.now(),
-                  hypothesisId: "H2",
-                }),
-              },
-            ).catch(() => {});
-            // #endregion
             setApplyingMsgId(assistantMsgId);
             for (let _bi = 0; _bi < codeBlocks.length; _bi++) {
               const block = codeBlocks[_bi];
               try {
                 const result = await executeCode(block.code);
-                // #region agent log
-                fetch(
-                  "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "X-Debug-Session-Id": "fc5e63",
-                    },
-                    body: JSON.stringify({
-                      sessionId: "fc5e63",
-                      location: "App.tsx:autoExec:success",
-                      message: "Block executed OK",
-                      data: {
-                        blockIndex: _bi,
-                        resultSnippet: String(result).slice(0, 200),
-                      },
-                      timestamp: Date.now(),
-                      hypothesisId: "H4",
-                    }),
-                  },
-                ).catch(() => {});
-                // #endregion
                 setMessages((prev) =>
                   prev.map((m) => {
                     if (m.id !== assistantMsgId) return m;
@@ -352,30 +305,6 @@ export default function App() {
               } catch (err) {
                 const errorMsg =
                   err instanceof Error ? err.message : String(err);
-                // #region agent log
-                fetch(
-                  "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "X-Debug-Session-Id": "fc5e63",
-                    },
-                    body: JSON.stringify({
-                      sessionId: "fc5e63",
-                      location: "App.tsx:autoExec:error",
-                      message: "Block execution FAILED",
-                      data: {
-                        blockIndex: _bi,
-                        error: errorMsg,
-                        codeSnippet: block.code.slice(0, 300),
-                      },
-                      timestamp: Date.now(),
-                      hypothesisId: "H1",
-                    }),
-                  },
-                ).catch(() => {});
-                // #endregion
                 setMessages((prev) =>
                   prev.map((m) => {
                     if (m.id !== assistantMsgId) return m;
