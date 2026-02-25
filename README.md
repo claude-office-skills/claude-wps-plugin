@@ -2,6 +2,29 @@
 
 WPS Office Excel AI 助手——通过自然语言对话操控表格，由 Claude API 驱动。
 
+## 版本日志
+
+### v1.0.0 (2026-02-25) — MVP 完整版
+
+**Phase 1: 基础架构**
+- React Task Pane (Vite + React + TypeScript) 侧边栏 UI
+- Express Proxy Server (:3001) 本地代理，调用 claude CLI 执行 AI 对话 (SSE 流式)
+- WPS Plugin Host (`main.js`) 运行在 WPS 上下文，通过 `.Value2` 读取表格数据
+- 数据通路：Plugin Host → proxy → Task Pane
+- 模型选择器：Sonnet 4.6 / Opus 4.6 / Haiku 4.5
+- WPS 加载项打包：`manifest.xml` + `ribbon.xml`
+
+**Phase 2: 侧边栏二次开发**
+- 代码执行桥：Task Pane → proxy 队列 → Plugin Host 执行 → 结果回传
+- Markdown 渲染 (`react-markdown` + `remark-gfm`)，流式纯文本/完成后 Markdown
+- 代码块语法高亮 (shiki) + Run/复制按钮
+- QuickActionCards 9 个快捷操作（通用 4 + 选区 5）
+- 附件菜单：剪贴板读取、PDF 提取、图片上传
+- SYSTEM_PROMPT：300+ 行 WPS ET API 完整参考
+- 中止生成时恢复用户输入
+
+---
+
 ## 快速开始
 
 ### 1. 配置 API Key
@@ -67,9 +90,11 @@ manifest.xml              # WPS 加载项清单
 
 Claude 会生成 WPS JS 代码，点击 `[run]` 执行即可。
 
-## MVP 后续计划
+## 后续计划
 
-- [ ] Phase 2：添加 MCP 工具调用（结构化操作，比代码更安全）
-- [ ] Phase 2：操作历史 + 撤销功能
-- [ ] Phase 3：多轮对话记忆工作表结构
-- [ ] Phase 3：企业版后端（API Key 集中管理、审计日志）
+- [ ] Phase 3：Skills/Commands 模块化重构（借鉴 Anthropic Cowork 插件架构）
+- [ ] Phase 3：清理 debug 日志，按需加载 system prompt
+- [ ] Phase 4：MCP 连接器支持外部数据源
+- [ ] Phase 4：操作历史 + 撤销功能
+- [ ] Phase 5：跨应用上下文（表格 → 演示 → 文档）
+- [ ] Phase 5：企业版后端（API Key 集中管理、审计日志）

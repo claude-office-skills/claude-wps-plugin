@@ -47,6 +47,7 @@ export default function App() {
   } | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const lastSentInputRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -201,6 +202,7 @@ export default function App() {
 
     const currentAttachments = [...attachedFiles];
     const currentPinned = pinnedSelection;
+    lastSentInputRef.current = userText;
     setInput("");
     setAttachedFiles([]);
     setPinnedSelection(null);
@@ -424,6 +426,7 @@ export default function App() {
     );
 
     abortRef.current = null;
+    lastSentInputRef.current = "";
   };
 
   const handleStop = () => {
@@ -431,18 +434,25 @@ export default function App() {
       abortRef.current.abort();
       abortRef.current = null;
     }
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.isStreaming
-          ? {
-              ...m,
-              content: m.content + "\n\n*（已中止生成）*",
-              isStreaming: false,
-            }
-          : m,
-      ),
-    );
+
+    const savedInput = lastSentInputRef.current;
+    lastSentInputRef.current = "";
+
+    setMessages((prev) => {
+      const streamingIdx = prev.findIndex((m) => m.isStreaming);
+      if (streamingIdx === -1) return prev;
+      const userMsgIdx = streamingIdx - 1;
+      return prev.filter(
+        (_, i) => i !== streamingIdx && i !== userMsgIdx,
+      );
+    });
+
+    setInput(savedInput);
     setLoading(false);
+
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
