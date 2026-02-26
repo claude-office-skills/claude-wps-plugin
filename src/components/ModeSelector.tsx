@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { InteractionMode } from "../types";
 import styles from "./ModeSelector.module.css";
 
@@ -30,7 +31,11 @@ interface Props {
   disabled?: boolean;
 }
 
-export default function ModeSelector({ mode, onChange, disabled }: Props) {
+const ModeSelector = memo(function ModeSelector({
+  mode,
+  onChange,
+  disabled,
+}: Props) {
   return (
     <div className={styles.wrapper}>
       {MODES.map((m) => {
@@ -59,4 +64,6 @@ export default function ModeSelector({ mode, onChange, disabled }: Props) {
       })}
     </div>
   );
-}
+});
+
+export default ModeSelector;
