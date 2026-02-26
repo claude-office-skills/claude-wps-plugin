@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import type { QuickAction, InteractionMode } from "../types";
 import styles from "./QuickActionCards.module.css";
 
@@ -54,7 +54,7 @@ interface Props {
   mode?: InteractionMode;
 }
 
-export default function QuickActionCards({
+const QuickActionCards = memo(function QuickActionCards({
   hasSelection,
   onAction,
   disabled,
@@ -164,4 +164,6 @@ export default function QuickActionCards({
       ))}
     </div>
   );
-}
+});
+
+export default QuickActionCards;
