@@ -9,7 +9,7 @@ interface Props {
   disabled?: boolean;
 }
 
-export default function AttachmentMenu({
+const AttachmentMenu = memo(function AttachmentMenu({
   onFileAttach,
   webSearchEnabled,
   onToggleWebSearch,
@@ -168,7 +168,9 @@ export default function AttachmentMenu({
       />
     </div>
   );
-}
+});
+
+export default AttachmentMenu;
 
 function PlusIcon() {
   return (
