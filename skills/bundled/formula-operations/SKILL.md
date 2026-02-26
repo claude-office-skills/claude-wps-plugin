@@ -3,6 +3,7 @@ name: formula-operations
 description: 公式运算规范 — .Formula 写入、常用公式模板、纠错方法、WPS 特有限制
 version: 1.0.0
 tags: [formula, function, calculation, correction]
+modes: [agent, plan, ask]
 context:
   keywords: [公式, 函数, SUM, VLOOKUP, IF, COUNTIF, SUMIF, INDEX, MATCH, 计算, 求和, 汇总, 纠错, 错误, VALUE, REF, NAME, 写公式, 平均, 最大, 最小, AVERAGE, MAX, MIN]
   selectionHint:

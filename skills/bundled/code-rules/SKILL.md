@@ -3,6 +3,7 @@ name: code-rules
 description: WPS 代码生成规则 — 单块规则、禁止拆分、数据保护、新建工作表模式
 version: 1.0.0
 tags: [code, rules, safety]
+modes: [agent, plan]
 context:
   always: true
 ---

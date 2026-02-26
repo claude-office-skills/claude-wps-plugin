@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { QuickAction } from "../types";
+import type { QuickAction, InteractionMode } from "../types";
 import styles from "./QuickActionCards.module.css";
 
 const PROXY_BASE = "http://127.0.0.1:3001";
@@ -12,6 +12,16 @@ interface CommandDef {
   description: string;
   scope: string;
   prompt: string;
+}
+
+interface ModeDef {
+  id: string;
+  quickActions?: Array<{
+    icon: string;
+    label: string;
+    prompt: string;
+    scope?: string;
+  }>;
 }
 
 const FALLBACK_GENERAL: QuickAction[] = [
@@ -41,17 +51,22 @@ interface Props {
   hasSelection: boolean;
   onAction: (prompt: string) => void;
   disabled?: boolean;
+  mode?: InteractionMode;
 }
 
 export default function QuickActionCards({
   hasSelection,
   onAction,
   disabled,
+  mode = "agent",
 }: Props) {
   const [generalCmds, setGeneralCmds] =
     useState<QuickAction[]>(FALLBACK_GENERAL);
   const [selectionCmds, setSelectionCmds] =
     useState<QuickAction[]>(FALLBACK_SELECTION);
+  const [modeActions, setModeActions] = useState<
+    Record<string, { general: QuickAction[]; selection: QuickAction[] }>
+  >({});
   const [stableHasSelection, setStableHasSelection] = useState(hasSelection);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -86,9 +101,53 @@ export default function QuickActionCards({
         if (sel.length > 0) setSelectionCmds(sel);
       })
       .catch(() => {});
+
+    fetch(`${PROXY_BASE}/modes`)
+      .then((r) => r.json())
+      .then((modes: ModeDef[]) => {
+        const result: Record<
+          string,
+          { general: QuickAction[]; selection: QuickAction[] }
+        > = {};
+        for (const m of modes) {
+          if (m.quickActions && m.quickActions.length > 0) {
+            result[m.id] = {
+              general: m.quickActions
+                .filter((a) => !a.scope || a.scope === "general")
+                .map((a) => ({
+                  icon: a.icon,
+                  label: a.label,
+                  prompt: a.prompt,
+                })),
+              selection: m.quickActions
+                .filter((a) => a.scope === "selection")
+                .map((a) => ({
+                  icon: a.icon,
+                  label: a.label,
+                  prompt: a.prompt,
+                })),
+            };
+          }
+        }
+        setModeActions(result);
+      })
+      .catch(() => {});
   }, []);
 
-  const actions = stableHasSelection ? selectionCmds : generalCmds;
+  const modeSpecific = modeActions[mode];
+  let actions: QuickAction[];
+  if (modeSpecific) {
+    actions =
+      stableHasSelection && modeSpecific.selection.length > 0
+        ? modeSpecific.selection
+        : modeSpecific.general.length > 0
+          ? modeSpecific.general
+          : stableHasSelection
+            ? selectionCmds
+            : generalCmds;
+  } else {
+    actions = stableHasSelection ? selectionCmds : generalCmds;
+  }
 
   return (
     <div className={styles.grid}>

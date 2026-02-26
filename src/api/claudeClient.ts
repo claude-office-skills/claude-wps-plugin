@@ -58,6 +58,7 @@ export interface StreamCallbacks {
   onThinking?: (text: string) => void;
   onComplete: (fullText: string) => void;
   onError: (err: Error) => void;
+  onModeInfo?: (mode: string, enforcement: Record<string, unknown>) => void;
 }
 
 /** 检查代理服务器是否在运行 */
@@ -77,6 +78,7 @@ export interface SendMessageOptions {
   attachments?: AttachmentFile[];
   signal?: AbortSignal;
   webSearch?: boolean;
+  mode?: string;
 }
 
 /** 流式发送消息给 Claude（通过本地代理） */
@@ -98,34 +100,11 @@ export async function sendMessage(
   ];
 
   const context = buildContextString(wpsCtx);
-  // #region agent log
-  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "fc5e63",
-    },
-    body: JSON.stringify({
-      sessionId: "fc5e63",
-      location: "claudeClient.ts:sendMessage",
-      message: "Built context string",
-      data: {
-        contextPreview: context.substring(0, 600),
-        selSheet: wpsCtx.selection?.sheetName,
-        selAddr: wpsCtx.selection?.address,
-        selSampleCount: wpsCtx.selection?.sampleValues?.length || 0,
-        usedRangeAddr: wpsCtx.usedRange?.address,
-        historyLen: history.length,
-      },
-      timestamp: Date.now(),
-      hypothesisId: "H1-H5",
-    }),
-  }).catch(() => {});
-  // #endregion
   let fullText = "";
 
   const payload: Record<string, unknown> = { messages, context };
   if (options?.model) payload.model = options.model;
+  if (options?.mode) payload.mode = options.mode;
   if (options?.webSearch) payload.webSearch = true;
   if (options?.attachments?.length) {
     payload.attachments = options.attachments.map((f) => ({
@@ -165,7 +144,9 @@ export async function sendMessage(
         const data = line.slice(6).trim();
         try {
           const event = JSON.parse(data);
-          if (event.type === "token") {
+          if (event.type === "mode") {
+            callbacks.onModeInfo?.(event.mode, event.enforcement);
+          } else if (event.type === "token") {
             fullText += event.text;
             callbacks.onToken(event.text);
           } else if (event.type === "thinking") {

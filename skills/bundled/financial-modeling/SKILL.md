@@ -3,6 +3,7 @@ name: financial-modeling
 description: 金融建模核心原则 — DCF/财务预测/估值模型的 Excel 实现规范
 version: 1.0.0
 tags: [finance, dcf, valuation, model, forecast]
+modes: [agent, plan, ask]
 context:
   keywords: [dcf, 估值, 建模, 财务模型, 敏感性, 折现, wacc, 自由现金流, fcf, ebit, 损益, npv, valuation, 财务预测, 情景分析, scenario, model, 股价, 投资]
 ---

@@ -3,6 +3,7 @@ name: wps-core-api
 description: WPS ET API 核心参考 — 全局变量、Range 读写、格式化、工作表操作、禁用 API
 version: 1.0.0
 tags: [wps, api, range, format, core]
+modes: [agent, plan]
 context:
   always: true
 metadata:

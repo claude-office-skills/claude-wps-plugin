@@ -1,5 +1,25 @@
 export type MessageRole = "user" | "assistant" | "system";
 
+export type InteractionMode = "agent" | "plan" | "ask";
+
+export interface ModeEnforcement {
+  codeBridge?: boolean | string;
+  codeBlockRender?: boolean | string;
+  maxTurns?: number;
+  autoExecute?: boolean | string;
+  stripCodeBlocks?: boolean | string;
+  planUI?: boolean | string;
+}
+
+export interface ModeDefinition {
+  id: string;
+  name: string;
+  description: string;
+  default?: boolean;
+  enforcement: ModeEnforcement;
+  quickActions?: QuickAction[];
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;

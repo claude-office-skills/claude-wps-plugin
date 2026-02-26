@@ -3,6 +3,7 @@ name: chart-creation
 description: WPS 图表创建 — AddChart2 方法、图表类型、配色方案、最佳实践
 version: 1.0.0
 tags: [chart, visualization, wps]
+modes: [agent, plan]
 context:
   keywords: [图表, 折线图, 柱状图, 饼图, 可视化, chart, 趋势, 走势, 成交量]
 metadata:

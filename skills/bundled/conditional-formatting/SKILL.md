@@ -3,6 +3,7 @@ name: conditional-formatting
 description: 条件格式与表格美化 — FormatConditions API、数据条、色阶、一键美化方案
 version: 1.0.0
 tags: [format, conditional, beautify, color, style]
+modes: [agent, plan]
 context:
   keywords: [条件格式, 高亮, 标记, 颜色, 数据条, 色阶, 图标集, 美化, 着色, 红绿, 斑马纹, 交替色, 样式, 好看, 漂亮, 整齐]
 ---

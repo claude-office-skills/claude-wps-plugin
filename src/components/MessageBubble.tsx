@@ -1,4 +1,11 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  memo,
+  useMemo,
+  type ReactNode,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "../types";
@@ -122,32 +129,55 @@ function ThinkingDoneIcon() {
   );
 }
 
-const markdownComponents = (
+function buildMarkdownComponents(
   message: ChatMessage,
   onCodeExecuted: Props["onCodeExecuted"],
   onRetryFix?: Props["onRetryFix"],
   isStreaming?: boolean,
-) => ({
-  pre({ children }: { children?: ReactNode }) {
-    return <>{children}</>;
-  },
-  code({ className, children }: { className?: string; children?: ReactNode }) {
-    const isInline = !className && !String(children).includes("\n");
-    if (isInline) {
-      return <code className={styles.inlineCode}>{children}</code>;
-    }
+) {
+  return {
+    pre({ children }: { children?: ReactNode }) {
+      return <>{children}</>;
+    },
+    code({
+      className,
+      children,
+    }: {
+      className?: string;
+      children?: ReactNode;
+    }) {
+      const isInline = !className && !String(children).includes("\n");
+      if (isInline) {
+        return <code className={styles.inlineCode}>{children}</code>;
+      }
 
-    const lang = /language-(\w+)/.exec(className || "")?.[1] || "javascript";
-    const codeStr = String(children).replace(/\n$/, "");
+      const lang = /language-(\w+)/.exec(className || "")?.[1] || "javascript";
+      const codeStr = String(children).replace(/\n$/, "");
 
-    const matchedBlock = message.codeBlocks?.find(
-      (b) => b.code === codeStr && b.language === lang,
-    );
+      const matchedBlock = message.codeBlocks?.find(
+        (b) => b.code === codeStr && b.language === lang,
+      );
 
-    if (matchedBlock) {
+      if (matchedBlock) {
+        return (
+          <CodeBlock
+            block={matchedBlock}
+            isStreaming={isStreaming}
+            onExecuted={(blockId, result, error) =>
+              onCodeExecuted(message.id, blockId, result, error)
+            }
+            onRetryFix={onRetryFix}
+          />
+        );
+      }
+
       return (
         <CodeBlock
-          block={matchedBlock}
+          block={{
+            id: `inline-${codeStr.slice(0, 8)}`,
+            language: lang,
+            code: codeStr,
+          }}
           isStreaming={isStreaming}
           onExecuted={(blockId, result, error) =>
             onCodeExecuted(message.id, blockId, result, error)
@@ -155,36 +185,23 @@ const markdownComponents = (
           onRetryFix={onRetryFix}
         />
       );
-    }
+    },
+    p({ children }: { children?: ReactNode }) {
+      return <p className={styles.paragraph}>{children}</p>;
+    },
+    table({ children }: { children?: ReactNode }) {
+      return (
+        <div className={styles.tableWrap}>
+          <table>{children}</table>
+        </div>
+      );
+    },
+  };
+}
 
-    return (
-      <CodeBlock
-        block={{
-          id: `inline-${codeStr.slice(0, 8)}`,
-          language: lang,
-          code: codeStr,
-        }}
-        isStreaming={isStreaming}
-        onExecuted={(blockId, result, error) =>
-          onCodeExecuted(message.id, blockId, result, error)
-        }
-        onRetryFix={onRetryFix}
-      />
-    );
-  },
-  p({ children }: { children?: ReactNode }) {
-    return <p className={styles.paragraph}>{children}</p>;
-  },
-  table({ children }: { children?: ReactNode }) {
-    return (
-      <div className={styles.tableWrap}>
-        <table>{children}</table>
-      </div>
-    );
-  },
-});
+const remarkPlugins = [remarkGfm];
 
-export default function MessageBubble({
+function MessageBubble({
   message,
   onCodeExecuted,
   onApplyCode,
@@ -200,6 +217,16 @@ export default function MessageBubble({
     !message.isStreaming &&
     codeBlocks.length > 0 &&
     codeBlocks.some((b) => !b.executed);
+
+  const streamingComponents = useMemo(
+    () => buildMarkdownComponents(message, onCodeExecuted, onRetryFix, true),
+    [message, onCodeExecuted, onRetryFix],
+  );
+
+  const doneComponents = useMemo(
+    () => buildMarkdownComponents(message, onCodeExecuted, onRetryFix, false),
+    [message, onCodeExecuted, onRetryFix],
+  );
 
   const handleCopy = async () => {
     try {

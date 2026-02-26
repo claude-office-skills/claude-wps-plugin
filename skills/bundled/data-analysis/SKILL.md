@@ -3,6 +3,7 @@ name: data-analysis
 description: 数据解读与分析 — 统计方法、趋势分析、透视汇总、结论输出规范
 version: 1.0.0
 tags: [analysis, statistics, insight, trend, pivot]
+modes: [agent, plan, ask]
 context:
   keywords: [分析, 报告, 洞察, 趋势, 统计, 均值, 标准差, 归因, 汇总分析, 透视, 对比, 环比, 同比, 描述性统计, 占比, 分布, 相关性, 回归, 预测]
 ---

@@ -1,5 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+_dist_stage/
+*.tar.gz
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,29 +16,28 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Environment (contains API keys)
+# Environment (may contain secrets)
 .env
 .env.local
 .env.*.local
 
-# Chat history (local session data)
+# Local session data
 .chat-history/
+
+# HTTPS certificates (local dev)
+certs/
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.local
 
 # OS files
 Thumbs.db

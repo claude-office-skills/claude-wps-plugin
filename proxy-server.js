@@ -37,8 +37,8 @@ function isPathSafe(filePath, allowedDir) {
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 // ── Skill Loader ──────────────────────────────────────────────
-function loadSkills() {
-  const skillsDir = join(__dirname, "skills", "bundled");
+function loadSkillsFromDir(subDir) {
+  const skillsDir = join(__dirname, "skills", subDir);
   const skills = new Map();
 
   if (!existsSync(skillsDir)) return skills;
@@ -58,6 +58,10 @@ function loadSkills() {
   }
 
   return skills;
+}
+
+function loadSkills() {
+  return loadSkillsFromDir("bundled");
 }
 
 function parseFrontmatter(raw) {
@@ -108,9 +112,13 @@ function parseFrontmatter(raw) {
   return { frontmatter: fm, body: match[2].trim() };
 }
 
-function matchSkills(allSkills, userMessage, wpsContext) {
+function matchSkills(allSkills, userMessage, wpsContext, mode) {
   const matched = [];
   for (const [id, skill] of allSkills) {
+    if (mode && Array.isArray(skill.modes) && !skill.modes.includes(mode)) {
+      continue;
+    }
+
     const ctx = skill.context || {};
     if (ctx.always === true || ctx.always === "true") {
       matched.push(skill);
@@ -270,7 +278,7 @@ try { chart.HasLegend = true; chart.Legend.Position = -4107; } catch(e) {}
 - ❌ 不设置颜色（默认灰色）
 `;
 
-function buildSystemPrompt(skills, todayStr, userMessage) {
+function buildSystemPrompt(skills, todayStr, userMessage, modeSkill) {
   let prompt = `你是 Claude，嵌入在 WPS Office Excel 中的 AI 数据处理助手。你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天的日期是 ${todayStr}。当用户询问"最近/近期"数据时，以今天为基准。
 
 ## ⚠️ 上下文优先级（最重要）
@@ -290,6 +298,10 @@ function buildSystemPrompt(skills, todayStr, userMessage) {
 
 \n`;
 
+  if (modeSkill && modeSkill.body) {
+    prompt += modeSkill.body + "\n\n";
+  }
+
   for (const skill of skills) {
     prompt += skill.body + "\n\n";
   }
@@ -304,8 +316,18 @@ function buildSystemPrompt(skills, todayStr, userMessage) {
 }
 
 const ALL_SKILLS = loadSkills();
+const ALL_MODES = loadSkillsFromDir("modes");
+const ALL_CONNECTORS = loadSkillsFromDir("connectors");
+const ALL_WORKFLOWS = loadSkillsFromDir("workflows");
+
 console.log(
-  `[skill-loader] 已加载 ${ALL_SKILLS.size} 个 bundled skills: ${[...ALL_SKILLS.keys()].join(", ")}`,
+  `[skill-loader] bundled: ${ALL_SKILLS.size} (${[...ALL_SKILLS.keys()].join(", ")})`,
+);
+console.log(
+  `[skill-loader] modes: ${ALL_MODES.size} (${[...ALL_MODES.keys()].join(", ")})`,
+);
+console.log(
+  `[skill-loader] connectors: ${ALL_CONNECTORS.size}, workflows: ${ALL_WORKFLOWS.size}`,
 );
 
 // ── Command Loader ────────────────────────────────────────────
@@ -495,11 +517,30 @@ app.get("/skills", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    version: "1.1.0",
+    version: "2.0.0",
     skills: ALL_SKILLS.size,
+    modes: ALL_MODES.size,
+    connectors: ALL_CONNECTORS.size,
+    workflows: ALL_WORKFLOWS.size,
     commands: ALL_COMMANDS.length,
     skillNames: [...ALL_SKILLS.keys()],
+    modeNames: [...ALL_MODES.keys()],
   });
+});
+
+app.get("/modes", (_req, res) => {
+  const modes = [];
+  for (const [id, skill] of ALL_MODES) {
+    modes.push({
+      id,
+      name: skill.name,
+      description: skill.description,
+      default: skill.default === true || skill.default === "true",
+      enforcement: skill.enforcement || {},
+      quickActions: skill.quickActions || [],
+    });
+  }
+  res.json(modes);
 });
 
 // ── 会话历史存储 ─────────────────────────────────────────────
@@ -723,7 +764,7 @@ const ALLOWED_MODELS = new Set([
 
 // ── 聊天接口（SSE 流式响应）──────────────────────────────────
 app.post("/chat", (req, res) => {
-  const { messages, context, model, attachments, webSearch } = req.body;
+  const { messages, context, model, attachments, webSearch, mode } = req.body;
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: "messages 不能为空" });
@@ -731,11 +772,26 @@ app.post("/chat", (req, res) => {
 
   const selectedModel = ALLOWED_MODELS.has(model) ? model : "claude-sonnet-4-6";
 
+  const currentMode = mode || "agent";
+  const modeSkill = ALL_MODES.get(currentMode) || ALL_MODES.get("agent");
+  const enforcement = modeSkill?.enforcement || {};
+  const skipCodeBridge =
+    enforcement.codeBridge === false || enforcement.codeBridge === "false";
+
   const lastUserMsg = messages[messages.length - 1]?.content || "";
   const todayStr = new Date().toISOString().split("T")[0];
-  const matchedSkills = matchSkills(ALL_SKILLS, lastUserMsg);
+  const matchedSkills = matchSkills(ALL_SKILLS, lastUserMsg, null, currentMode);
+
+  const matchedConnectors = matchSkills(
+    ALL_CONNECTORS,
+    lastUserMsg,
+    null,
+    currentMode,
+  );
+  const allMatched = [...matchedSkills, ...matchedConnectors];
+
   let fullPrompt =
-    buildSystemPrompt(matchedSkills, todayStr, lastUserMsg) + "\n";
+    buildSystemPrompt(allMatched, todayStr, lastUserMsg, modeSkill) + "\n";
 
   const memory = loadMemory();
   if (memory.preferences && Object.keys(memory.preferences).length > 0) {
@@ -818,6 +874,9 @@ app.post("/chat", (req, res) => {
   }, 5000);
 
   const claudePath = process.env.CLAUDE_PATH || "claude";
+  const maxTurns = String(
+    enforcement.maxTurns || (currentMode === "ask" ? 1 : 5),
+  );
   const cliArgs = [
     "-p",
     "--verbose",
@@ -825,7 +884,7 @@ app.post("/chat", (req, res) => {
     "stream-json",
     "--include-partial-messages",
     "--max-turns",
-    "5",
+    maxTurns,
     "--model",
     selectedModel,
   ];
@@ -834,6 +893,10 @@ app.post("/chat", (req, res) => {
     cliArgs.push("--allowedTools", "WebSearch");
   }
   const child = spawn(claudePath, cliArgs, { env: { ...process.env } });
+
+  res.write(
+    `data: ${JSON.stringify({ type: "mode", mode: currentMode, enforcement })}\n\n`,
+  );
 
   child.stdin.write(fullPrompt);
   child.stdin.end();

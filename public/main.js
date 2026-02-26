@@ -1,320 +1,303 @@
 /**
- * WPS 加载项入口文件（仅在 Plugin Host 上下文中有效）
+ * WPS 加载项入口文件
  *
- * 架构说明：
- * - Plugin Host：WPS 加载 publish.xml 中的 URL，注入 wps 全局对象（含完整 ET API）
- * - Task Pane：由 CreateTaskPane 打开的独立 WebView，无 ET API
- * - 通信方式：Plugin Host 定时读取 ET 数据 → POST 到 proxy-server → Task Pane GET 获取
- * - 代码执行：Task Pane → proxy /execute-code → Plugin Host 轮询 /pending-code → 执行 → /code-result
- *
- * WPS JS API 关键规则（通过运行时探测证实）：
- *   .Value2       → 直接返回 2D JS 数组（最佳读值方式）
- *   .Value/.Address → 是函数（getter），需要 .Address() 调用
- *   .Rows.Count   → 直接属性
- *   .Sheets.Item(i) → 访问工作表
+ * 1. Ribbon 按钮：打开 Claude 侧边栏 / JS 调试器
+ * 2. 上下文同步：定时将 WPS 数据推送到 proxy-server
+ * 3. 代码执行桥：轮询 proxy 的待执行代码队列并在 WPS 上下文中执行
  */
 
-var PLUGIN_URL = "http://127.0.0.1:5173";
+var TASKPANE_URL = "http://127.0.0.1:5173/";
 var PROXY_URL = "http://127.0.0.1:3001";
+var CTX_INTERVAL = 2000;
+var CODE_POLL_INTERVAL = 800;
+var TASKPANE_KEY = "claude_taskpane_id";
 
-var _isPluginHost =
-  typeof wps !== "undefined" && typeof wps.CreateTaskPane === "function";
+var _ctxTimer = null;
+var _codePollTimer = null;
+var _syncToken = "sync_" + Date.now();
 
-if (_isPluginHost) {
-  function OnOpenClaudePanel() {
+// ── Ribbon 按钮回调 ──────────────────────────────────────────
+
+function OnOpenClaudePanel() {
+  try {
+    var tsId = null;
     try {
-      var taskPane = wps.CreateTaskPane(PLUGIN_URL + "/index.html");
-      taskPane.Visible = true;
-    } catch (e) {
-      alert("打开 Claude 面板失败：" + e.message);
-    }
-  }
+      tsId = wps.PluginStorage.getItem(TASKPANE_KEY);
+    } catch (e) {}
 
-  function GetClaudeIcon() {
-    return "claude-icon.png";
-  }
-
-  function GetDebugIcon() {
-    return "debug-icon.png";
-  }
-
-  function OnOpenJSDebugger() {
-    try {
-      if (
-        typeof wps.PluginStorage !== "undefined" &&
-        typeof wps.PluginStorage.openDebugger === "function"
-      ) {
-        wps.PluginStorage.openDebugger();
-      } else if (typeof wps.openDevTools === "function") {
-        wps.openDevTools();
-      } else {
-        alert("JS 调试器在当前环境下不可用");
-      }
-    } catch (e) {
-      alert("打开调试器失败：" + e.message);
-    }
-  }
-
-  function OnAddinLoad(ribbonUI) {
-    return true;
-  }
-
-  // ── 辅助函数 ──
-
-  function extractValues(range, limit) {
-    var raw = range.Value2;
-    var out = [];
-    if (Array.isArray(raw)) {
-      var n = Math.min(raw.length, limit);
-      for (var r = 0; r < n; r++) {
-        out.push(Array.isArray(raw[r]) ? raw[r] : [raw[r]]);
-      }
-    } else if (raw !== null && raw !== undefined) {
-      out = [[raw]];
-    }
-    return out;
-  }
-
-  function profileSelection(sel, sampleValues) {
-    var profile = { emptyCellCount: 0, hasFormulas: false };
-    try {
-      for (var r = 0; r < sampleValues.length; r++) {
-        var row = sampleValues[r];
-        if (!Array.isArray(row)) continue;
-        for (var c = 0; c < row.length; c++) {
-          if (row[c] === null || row[c] === undefined || row[c] === "") {
-            profile.emptyCellCount++;
-          }
+    if (tsId) {
+      try {
+        var existing = wps.GetTaskPane(tsId);
+        if (existing) {
+          existing.Visible = !existing.Visible;
+          startBackgroundSync();
+          return;
         }
-      }
-    } catch (e) {}
-    try {
-      var checkLimit = Math.min(10, sel.Rows.Count);
-      var checkCols = Math.min(5, sel.Columns.Count);
-      for (var r = 1; r <= checkLimit && !profile.hasFormulas; r++) {
-        for (var c = 1; c <= checkCols; c++) {
-          try {
-            var f = sel.Rows(r).Columns(c).Formula;
-            if (typeof f === "string" && f.charAt(0) === "=") {
-              profile.hasFormulas = true;
-              break;
-            }
-          } catch (e2) {}
-        }
-      }
-    } catch (e) {}
-    return profile;
-  }
-
-  function getAddress(range) {
-    try {
-      var addr = range.Address();
-      if (addr) return addr;
-    } catch (e) {}
-    try {
-      var addr2 = range.Address;
-      if (addr2 !== undefined && addr2 !== null) return String(addr2);
-    } catch (e2) {}
-    try {
-      return "$" + range.Column + ":" + range.Row;
-    } catch (e3) {}
-    return "";
-  }
-
-  // ── ET API 数据读取 ──
-
-  var SAMPLE_LIMIT = 50;
-
-  function readWpsContext() {
-    var result = {
-      workbookName: "",
-      sheetNames: [],
-      selection: null,
-      usedRange: null,
-    };
-
-    try {
-      var app = Application;
-      var wb = app.ActiveWorkbook;
-      if (!wb) {
-        result.error = "no-workbook";
-        return result;
-      }
-      result.workbookName = wb.Name || "";
-    } catch (e0) {
-      result.error = "workbook: " + e0.message;
-      return result;
+      } catch (e) {}
     }
 
-    var wb = Application.ActiveWorkbook;
-    var ws;
-    try {
-      ws = wb.ActiveSheet;
-    } catch (e1) {}
+    var taskPane = wps.CreateTaskPane(TASKPANE_URL);
+    taskPane.DockPosition =
+      wps.Enum && wps.Enum.JSKsoEnum_msoCTPDockPositionRight
+        ? wps.Enum.JSKsoEnum_msoCTPDockPositionRight
+        : 2;
+    taskPane.Visible = true;
 
     try {
-      var sheetsCol = wb.Sheets;
-      if (!sheetsCol) sheetsCol = wb.Worksheets;
-      if (sheetsCol && typeof sheetsCol.Count !== "undefined") {
-        for (var i = 1; i <= sheetsCol.Count; i++) {
-          result.sheetNames.push(sheetsCol.Item(i).Name);
-        }
-      }
-    } catch (e2) {}
-
-    try {
-      var sel = Application.Selection;
-      if (sel && ws) {
-        var rc = 1,
-          cc = 1;
-        try {
-          rc = sel.Rows.Count;
-        } catch (e) {}
-        try {
-          cc = sel.Columns.Count;
-        } catch (e) {}
-
-        var MAX_CELLS_EXTRACT = 5000;
-        var selAddr = getAddress(sel);
-        var totalCells = rc * cc;
-
-        if (totalCells > MAX_CELLS_EXTRACT) {
-          result.selection = {
-            address: selAddr,
-            sheetName: ws.Name || "",
-            rowCount: rc,
-            colCount: cc,
-            sampleValues: [],
-            hasMoreRows: true,
-            tooLargeToRead: true,
-          };
-        } else {
-          var sv = extractValues(sel, SAMPLE_LIMIT);
-          var prof = profileSelection(sel, sv);
-          result.selection = {
-            address: selAddr,
-            sheetName: ws.Name || "",
-            rowCount: rc,
-            colCount: cc,
-            sampleValues: sv,
-            hasMoreRows: rc > SAMPLE_LIMIT,
-            emptyCellCount: prof.emptyCellCount,
-            hasFormulas: prof.hasFormulas,
-          };
-        }
-      }
-    } catch (e3) {}
-
-    try {
-      if (ws) {
-        var ur = ws.UsedRange;
-        if (ur) {
-          var urc = 1,
-            ucc = 1;
-          try {
-            urc = ur.Rows.Count;
-          } catch (e) {}
-          try {
-            ucc = ur.Columns.Count;
-          } catch (e) {}
-          result.usedRange = {
-            address: getAddress(ur),
-            rowCount: urc,
-            colCount: ucc,
-            sampleValues: extractValues(ur, SAMPLE_LIMIT),
-            hasMoreRows: urc > SAMPLE_LIMIT,
-          };
-        }
-      }
-    } catch (e4) {}
-
-    return result;
+      wps.PluginStorage.setItem(TASKPANE_KEY, taskPane.ID);
+    } catch (e) {}
+    startBackgroundSync();
+  } catch (e) {
+    alert(
+      "打开 Claude 面板失败：" +
+        e.message +
+        "\n\n请确保开发服务器已启动：\ncd ~/需求讨论/claude-wps-plugin && npm run dev",
+    );
   }
+}
 
-  // ── 定时上报 ──
+function OnOpenJSDebugger() {
+  try {
+    if (
+      typeof wps.PluginStorage !== "undefined" &&
+      typeof wps.PluginStorage.openDebugger === "function"
+    ) {
+      wps.PluginStorage.openDebugger();
+    } else if (typeof wps.openDevTools === "function") {
+      wps.openDevTools();
+    } else if (
+      typeof Application !== "undefined" &&
+      typeof Application.PluginStorage !== "undefined"
+    ) {
+      Application.PluginStorage.openDebugger();
+    } else {
+      alert("JS 调试器在当前环境下不可用");
+    }
+  } catch (e) {
+    alert("打开调试器失败：" + e.message);
+  }
+}
 
-  function pushContextToProxy() {
+function GetClaudeIcon() {
+  return "claude-icon.png";
+}
+
+function GetDebugIcon() {
+  return "debug-icon.png";
+}
+
+function OnAddinLoad(ribbonUI) {
+  if (typeof ribbonUI === "object") {
+    // ribbon 引用
+  }
+  startBackgroundSync();
+}
+
+window.ribbon_bindUI = function (bindUI) {
+  bindUI({
+    OnOpenClaudePanel: OnOpenClaudePanel,
+    OnOpenJSDebugger: OnOpenJSDebugger,
+    GetClaudeIcon: GetClaudeIcon,
+    GetDebugIcon: GetDebugIcon,
+  });
+};
+
+// ── 后台同步启动 ─────────────────────────────────────────────
+
+function startBackgroundSync() {
+  if (_ctxTimer) {
     try {
-      var ctx = readWpsContext();
-      fetch(PROXY_URL + "/wps-context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ctx),
-      }).catch(function () {});
+      clearInterval(_ctxTimer);
     } catch (e) {}
   }
-
-  setTimeout(pushContextToProxy, 1000);
-  setInterval(pushContextToProxy, 2000);
-
-  // ── 代码执行桥 ──
-
-  function pollAndExecuteCode() {
-    fetch(PROXY_URL + "/pending-code")
-      .then(function (res) {
-        return res.json();
-      })
-      .then(function (data) {
-        if (!data.pending) return;
-
-        var id = data.id;
-        var code = data.code;
-        var result = null;
-        var error = null;
-
-        try {
-          var _cellHelper =
-            "function __CELL(ws,r,c){" +
-            'var s="";var n=c;while(n>0){n--;s=String.fromCharCode(65+(n%26))+s;n=Math.floor(n/26);}' +
-            "return ws.Range(s+r);" +
-            "}\n";
-          var _safeCode =
-            _cellHelper + code.replace(/(\b\w+)\.Cells\s*\(/g, "__CELL($1,");
-
-          var fn = new Function(
-            "Application",
-            "ActiveWorkbook",
-            "ActiveSheet",
-            "Selection",
-            _safeCode,
-          );
-          result = fn(
-            Application,
-            Application.ActiveWorkbook,
-            Application.ActiveWorkbook.ActiveSheet,
-            Application.Selection,
-          );
-          if (result === undefined || result === null) {
-            result = "执行成功（无返回值）";
-          } else {
-            result = String(result);
-          }
-        } catch (e) {
-          error = e.message || String(e);
-        }
-
-        fetch(PROXY_URL + "/code-result", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: id, result: result, error: error }),
-        }).catch(function () {});
-
-        pushContextToProxy();
-      })
-      .catch(function () {});
+  if (_codePollTimer) {
+    try {
+      clearInterval(_codePollTimer);
+    } catch (e) {}
   }
+  _syncToken = "sync_" + Date.now();
+  pushWpsContext();
+  _ctxTimer = setInterval(pushWpsContext, CTX_INTERVAL);
+  _codePollTimer = setInterval(pollAndExecuteCode, CODE_POLL_INTERVAL);
+}
 
-  setInterval(pollAndExecuteCode, 500);
+// ── 上下文推送 ───────────────────────────────────────────────
 
-  // ── Ribbon UI ──
+function CL(c) {
+  var s = "";
+  while (c > 0) {
+    c--;
+    s = String.fromCharCode(65 + (c % 26)) + s;
+    c = Math.floor(c / 26);
+  }
+  return s;
+}
 
-  window.ribbon_bindUI = function (bindUI) {
-    bindUI({
-      OnOpenClaudePanel: OnOpenClaudePanel,
-      OnOpenJSDebugger: OnOpenJSDebugger,
-      GetClaudeIcon: GetClaudeIcon,
-      GetDebugIcon: GetDebugIcon,
-      OnAddinLoad: OnAddinLoad,
-    });
+function pushWpsContext() {
+  try {
+    var ctx = collectWpsContext();
+    if (!ctx.workbookName) return;
+    httpPost(PROXY_URL + "/wps-context", JSON.stringify(ctx));
+  } catch (e) {
+    // 静默失败，避免影响 WPS 主线程
+  }
+}
+
+function collectWpsContext() {
+  var result = {
+    workbookName: "",
+    sheetNames: [],
+    selection: null,
+    usedRange: null,
   };
+
+  try {
+    var wb = Application.ActiveWorkbook;
+    if (!wb) return result;
+
+    result.workbookName = wb.Name || "";
+
+    try {
+      var count = wb.Sheets.Count;
+      for (var i = 1; i <= count; i++) {
+        result.sheetNames.push(wb.Sheets.Item(i).Name);
+      }
+    } catch (e) {}
+
+    try {
+      var ws = Application.ActiveSheet;
+      var sel = Application.Selection;
+
+      if (sel && sel.Address) {
+        var addr = sel.Address.replace(/\$/g, "");
+        var rowCount = sel.Rows.Count;
+        var colCount = sel.Columns.Count;
+        var totalCells = rowCount * colCount;
+
+        var sampleRows = Math.min(rowCount, 20);
+        var sampleCols = Math.min(colCount, 15);
+        var sampleValues = [];
+
+        if (totalCells <= 5000) {
+          try {
+            var topLeft = CL(sel.Column) + sel.Row;
+            var botRight =
+              CL(sel.Column + sampleCols - 1) + (sel.Row + sampleRows - 1);
+            var batchVal = ws.Range(topLeft + ":" + botRight).Value2;
+            if (batchVal) {
+              if (sampleRows === 1 && sampleCols === 1) {
+                sampleValues = [[batchVal === undefined ? "" : batchVal]];
+              } else if (sampleRows === 1) {
+                sampleValues = [batchVal];
+              } else {
+                for (var ri = 0; ri < batchVal.length; ri++) {
+                  var srcRow = batchVal[ri];
+                  var outRow = [];
+                  if (Array.isArray(srcRow)) {
+                    for (var ci = 0; ci < srcRow.length; ci++) {
+                      var cv = srcRow[ci];
+                      outRow.push(cv === undefined || cv === null ? "" : cv);
+                    }
+                  } else {
+                    outRow.push(
+                      srcRow === undefined || srcRow === null ? "" : srcRow,
+                    );
+                  }
+                  sampleValues.push(outRow);
+                }
+              }
+            }
+          } catch (e) {
+            sampleValues = [];
+          }
+        }
+
+        result.selection = {
+          address: addr,
+          sheetName: ws.Name || "",
+          rowCount: rowCount,
+          colCount: colCount,
+          hasMoreRows: rowCount > 20,
+          hasMoreCols: colCount > 15,
+          totalCells: totalCells,
+          sampleValues: sampleValues,
+        };
+      }
+    } catch (e) {}
+
+    try {
+      var ws2 = Application.ActiveSheet;
+      var ur = ws2.UsedRange;
+      if (ur && ur.Address) {
+        result.usedRange = {
+          address: ur.Address.replace(/\$/g, ""),
+          rowCount: ur.Rows.Count,
+          colCount: ur.Columns.Count,
+        };
+      }
+    } catch (e) {}
+  } catch (e) {}
+
+  return result;
+}
+
+// ── 代码执行桥 ───────────────────────────────────────────────
+
+function pollAndExecuteCode() {
+  try {
+    var resp = httpGet(PROXY_URL + "/pending-code");
+    if (!resp) return;
+
+    var data = JSON.parse(resp);
+    if (!data.pending) return;
+
+    var id = data.id;
+    var code = data.code;
+
+    try {
+      var execResult = executeInWps(code);
+      httpPost(
+        PROXY_URL + "/code-result",
+        JSON.stringify({ id: id, result: execResult }),
+      );
+    } catch (execErr) {
+      httpPost(
+        PROXY_URL + "/code-result",
+        JSON.stringify({ id: id, error: execErr.message || String(execErr) }),
+      );
+    }
+  } catch (e) {
+    // 网络错误静默
+  }
+}
+
+function executeInWps(code) {
+  var fn = new Function(code);
+  var result = fn();
+  return result === undefined ? "执行成功" : String(result);
+}
+
+// ── HTTP 工具（同步 XHR）─────────────────────────────────────
+
+function httpPost(url, body) {
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", url, false);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.send(body);
+    return xhr.responseText;
+  } catch (e) {
+    return null;
+  }
+}
+
+function httpGet(url) {
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", url, false);
+    xhr.send();
+    return xhr.responseText;
+  } catch (e) {
+    return null;
+  }
 }

@@ -3,6 +3,7 @@ name: template-generation
 description: SaaS 级管理系统模板生成规范 — 结构层、数据层、格式层、功能层
 version: 1.0.0
 tags: [template, management, system, saas]
+modes: [agent, plan]
 context:
   keywords: [模板, 管理系统, 管理表, 创建, 生成, 报表, 仪表板, 系统, dashboard]
 ---

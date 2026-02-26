@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { nanoid } from "nanoid";
 import { Claude } from "@lobehub/icons";
 import MessageBubble from "./components/MessageBubble";
 import ModelSelector from "./components/ModelSelector";
+import ModeSelector from "./components/ModeSelector";
 import AttachmentMenu from "./components/AttachmentMenu";
 import QuickActionCards from "./components/QuickActionCards";
 import HistoryPanel from "./components/HistoryPanel";
@@ -24,6 +25,7 @@ import type {
   WpsContext,
   CodeBlock,
   AttachmentFile,
+  InteractionMode,
 } from "./types";
 import styles from "./App.module.css";
 
@@ -56,11 +58,18 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string>(nanoid());
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const [inputBoxHeight, setInputBoxHeight] = useState(120);
+  const [currentMode, setCurrentMode] = useState<InteractionMode>(
+    () =>
+      (localStorage.getItem("wps-claude-mode") as InteractionMode) || "agent",
+  );
+
   const abortRef = useRef<AbortController | null>(null);
   const lastSentInputRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragStartRef = useRef<{ y: number; h: number } | null>(null);
 
   // 初始化：获取 WPS 上下文 + 订阅选区变化
   useEffect(() => {
@@ -200,51 +209,57 @@ export default function App() {
     [],
   );
 
-  const handleApplyCode = useCallback(
-    async (msgId: string) => {
-      const msg = messages.find((m) => m.id === msgId);
-      const blocks = msg?.codeBlocks?.filter((b) => !b.executed);
-      if (!blocks?.length) return;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
-      setApplyingMsgId(msgId);
+  const handleApplyCode = useCallback(async (msgId: string) => {
+    const msg = messagesRef.current.find((m) => m.id === msgId);
+    const blocks = msg?.codeBlocks?.filter((b) => !b.executed);
+    if (!blocks?.length) return;
 
-      for (const block of blocks) {
-        try {
-          const result = await executeCode(block.code);
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== msgId) return m;
-              const updated = m.codeBlocks?.map((b) =>
-                b.id === block.id ? { ...b, executed: true, result } : b,
-              );
-              return { ...m, codeBlocks: updated };
-            }),
-          );
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== msgId) return m;
-              const updated = m.codeBlocks?.map((b) =>
-                b.id === block.id
-                  ? { ...b, executed: true, error: errorMsg }
-                  : b,
-              );
-              return { ...m, codeBlocks: updated };
-            }),
-          );
-          break;
-        }
+    setApplyingMsgId(msgId);
+
+    for (const block of blocks) {
+      try {
+        const result = await executeCode(block.code);
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== msgId) return m;
+            const updated = m.codeBlocks?.map((b) =>
+              b.id === block.id ? { ...b, executed: true, result } : b,
+            );
+            return { ...m, codeBlocks: updated };
+          }),
+        );
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== msgId) return m;
+            const updated = m.codeBlocks?.map((b) =>
+              b.id === block.id ? { ...b, executed: true, error: errorMsg } : b,
+            );
+            return { ...m, codeBlocks: updated };
+          }),
+        );
+        break;
       }
+    }
 
-      setApplyingMsgId(null);
-    },
-    [messages],
+    setApplyingMsgId(null);
+  }, []);
+
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+
+  const handleSendRef = useRef<(text?: string) => Promise<void>>(
+    null as unknown as (text?: string) => Promise<void>,
   );
 
-  const handleRetryFix = (code: string, error: string, language: string) => {
-    if (loading) return;
-    const fixPrompt = `代码执行出错，请修复以下所有错误并重新生成完整代码。
+  const handleRetryFix = useCallback(
+    (code: string, error: string, language: string) => {
+      if (loadingRef.current) return;
+      const fixPrompt = `代码执行出错，请修复以下所有错误并重新生成完整代码。
 
 **错误信息：**
 \`\`\`
@@ -261,8 +276,10 @@ ${code}
 2. 使用 WPS 兼容的 API（避免 .Borders、FormatConditions 不支持的参数等）
 3. 对可能失败的操作添加 try/catch 保护
 4. 必须使用 Application.ActiveSheet 而不是硬编码 sheet 名称`;
-    handleSend(fixPrompt);
-  };
+      handleSendRef.current(fixPrompt);
+    },
+    [],
+  );
 
   const handlePinSelection = useCallback(() => {
     if (!wpsCtx?.selection) return;
@@ -277,12 +294,57 @@ ${code}
     textareaRef.current?.focus();
   }, [wpsCtx]);
 
+  const handleModeChange = useCallback((mode: InteractionMode) => {
+    setCurrentMode(mode);
+    localStorage.setItem("wps-claude-mode", mode);
+  }, []);
+
   const handleFileAttach = useCallback((file: AttachmentFile) => {
     setAttachedFiles((prev) => [...prev, file]);
   }, []);
 
   const handleRemoveFile = useCallback((name: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.name !== name));
+  }, []);
+
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setInput(e.target.value);
+    },
+    [],
+  );
+
+  const handleQuickAction = useCallback((prompt: string) => {
+    handleSendRef.current(prompt);
+  }, []);
+
+  const handleToggleWebSearch = useCallback(() => {
+    setWebSearchEnabled((v) => !v);
+  }, []);
+
+  const handleSendClick = useCallback(() => {
+    handleSendRef.current();
+  }, []);
+
+  const handleOpenHistory = useCallback(() => {
+    setHistoryOpen(true);
+  }, []);
+
+  const handleCloseHistory = useCallback(() => {
+    setHistoryOpen(false);
+  }, []);
+
+  const handleNewChat = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setSessionId(nanoid());
+    setMessages([WELCOME_MESSAGE]);
+    setLoading(false);
+    setApplyingMsgId(null);
+    setPinnedSelection(null);
+    setAttachedFiles([]);
   }, []);
 
   const handleSend = async (text?: string) => {
@@ -342,6 +404,8 @@ ${code}
     const thinkingStart = Date.now();
     let firstTokenReceived = false;
 
+    const isAskMode = currentMode === "ask";
+
     await sendMessage(
       userText,
       messages.filter((m) => m.id !== "welcome"),
@@ -371,7 +435,7 @@ ${code}
           );
         },
         onComplete: async (text) => {
-          const rawBlocks = extractCodeBlocks(text);
+          const rawBlocks = isAskMode ? [] : extractCodeBlocks(text);
           const codeBlocks: CodeBlock[] = rawBlocks.map((b) => ({
             id: nanoid(),
             language: b.language,
@@ -447,6 +511,7 @@ ${code}
       },
       {
         model: selectedModel,
+        mode: currentMode,
         attachments:
           currentAttachments.length > 0 ? currentAttachments : undefined,
         signal: controller.signal,
@@ -457,6 +522,8 @@ ${code}
     abortRef.current = null;
     lastSentInputRef.current = "";
   };
+
+  handleSendRef.current = handleSend;
 
   const handleStop = () => {
     if (abortRef.current) {
@@ -675,6 +742,27 @@ ${code}
     }
   };
 
+  const inputBoxHeightRef = useRef(inputBoxHeight);
+  inputBoxHeightRef.current = inputBoxHeight;
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStartRef.current = { y: e.clientY, h: inputBoxHeightRef.current };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      const delta = dragStartRef.current.y - ev.clientY;
+      const next = Math.max(80, Math.min(400, dragStartRef.current.h + delta));
+      setInputBoxHeight(next);
+    };
+    const onUp = () => {
+      dragStartRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
+
   return (
     <div className={styles.shell}>
       {/* 顶部 Header */}
@@ -689,25 +777,14 @@ ${code}
         <div className={styles.headerActions}>
           <button
             className={styles.headerBtn}
-            onClick={() => setHistoryOpen(true)}
+            onClick={handleOpenHistory}
             title="历史记录"
           >
             <HistoryIcon />
           </button>
           <button
             className={styles.headerBtn}
-            onClick={() => {
-              if (abortRef.current) {
-                abortRef.current.abort();
-                abortRef.current = null;
-              }
-              setSessionId(nanoid());
-              setMessages([WELCOME_MESSAGE]);
-              setLoading(false);
-              setApplyingMsgId(null);
-              setPinnedSelection(null);
-              setAttachedFiles([]);
-            }}
+            onClick={handleNewChat}
             title="新对话"
           >
             <NewChatIcon />
@@ -763,70 +840,73 @@ ${code}
         {/* 智能快捷卡片 - 水平滚动行 */}
         <QuickActionCards
           hasSelection={!!wpsCtx?.selection}
-          onAction={(prompt) => handleSend(prompt)}
+          onAction={handleQuickAction}
           disabled={loading}
+          mode={currentMode}
         />
 
-        <div className={styles.inputBox}>
-          <AttachmentMenu
-            onFileAttach={handleFileAttach}
-            webSearchEnabled={webSearchEnabled}
-            onToggleWebSearch={() => setWebSearchEnabled((v) => !v)}
-            disabled={loading}
-          />
-          <div className={styles.inputFlow}>
-            {/* 选区标签 - inline */}
-            {pinnedSelection && (
-              <span className={styles.inlineChip}>
-                <TableIcon />
-                <span className={styles.chipLabel}>
-                  {pinnedSelection.label}（{pinnedSelection.rowCount}×
-                  {pinnedSelection.colCount}）
-                </span>
-                <button
-                  className={styles.chipRemove}
-                  onClick={() => setPinnedSelection(null)}
-                >
-                  ×
-                </button>
-              </span>
-            )}
-            {/* 附件标签 - inline */}
-            {attachedFiles.map((f) => (
-              <span
-                key={f.name}
-                className={`${styles.inlineChip} ${f.type === "table" ? styles.chipTable : ""} ${f.type === "image" ? styles.chipImage : ""}`}
-              >
-                {f.type === "image" ? (
-                  f.previewUrl ? (
-                    <img
-                      src={f.previewUrl}
-                      alt={f.name}
-                      className={styles.chipThumb}
-                    />
-                  ) : (
-                    <ImageIcon />
-                  )
-                ) : f.type === "table" ? (
+        <div className={styles.inputBox} style={{ height: inputBoxHeight }}>
+          {/* 拖拽手柄 */}
+          <div className={styles.dragHandle} onMouseDown={handleDragStart}>
+            <div className={styles.dragDots} />
+          </div>
+
+          {/* 输入主体 */}
+          <div className={styles.inputBody}>
+            {/* inline chips */}
+            <div className={styles.inputChips}>
+              {pinnedSelection && (
+                <span className={styles.inlineChip}>
                   <TableIcon />
-                ) : (
-                  <span className={styles.chipFileIcon}>📎</span>
-                )}
-                <span className={styles.chipLabel}>{f.name}</span>
-                <button
-                  className={styles.chipRemove}
-                  onClick={() => handleRemoveFile(f.name)}
+                  <span className={styles.chipLabel}>
+                    {pinnedSelection.label}（{pinnedSelection.rowCount}×
+                    {pinnedSelection.colCount}）
+                  </span>
+                  <button
+                    className={styles.chipRemove}
+                    onClick={() => setPinnedSelection(null)}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
+              {attachedFiles.map((f) => (
+                <span
+                  key={f.name}
+                  className={`${styles.inlineChip} ${f.type === "table" ? styles.chipTable : ""} ${f.type === "image" ? styles.chipImage : ""}`}
                 >
-                  ×
-                </button>
-              </span>
-            ))}
+                  {f.type === "image" ? (
+                    f.previewUrl ? (
+                      <img
+                        src={f.previewUrl}
+                        alt={f.name}
+                        className={styles.chipThumb}
+                      />
+                    ) : (
+                      <ImageIcon />
+                    )
+                  ) : f.type === "table" ? (
+                    <TableIcon />
+                  ) : (
+                    <span className={styles.chipFileIcon}>📎</span>
+                  )}
+                  <span className={styles.chipLabel}>{f.name}</span>
+                  <button
+                    className={styles.chipRemove}
+                    onClick={() => handleRemoveFile(f.name)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+
             {/* 文本输入 */}
             <textarea
               ref={textareaRef}
               className={styles.inlineTextarea}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={
@@ -838,35 +918,54 @@ ${code}
               disabled={loading}
             />
           </div>
-          <ModelSelector
-            value={selectedModel}
-            onChange={setSelectedModel}
-            disabled={loading}
-          />
-          {loading ? (
-            <button
-              className={`${styles.sendBtn} ${styles.stopBtn}`}
-              onClick={handleStop}
-              title="停止生成"
-            >
-              <StopIcon />
-            </button>
-          ) : (
-            <button
-              className={styles.sendBtn}
-              onClick={() => handleSend()}
-              disabled={!input.trim()}
-              title="发送"
-            >
-              <SendIcon />
-            </button>
-          )}
+
+          {/* 底部工具栏 */}
+          <div className={styles.inputToolbar}>
+            <div className={styles.toolbarLeft}>
+              <AttachmentMenu
+                onFileAttach={handleFileAttach}
+                webSearchEnabled={webSearchEnabled}
+                onToggleWebSearch={handleToggleWebSearch}
+                disabled={loading}
+              />
+              <ModeSelector
+                mode={currentMode}
+                onChange={handleModeChange}
+                disabled={loading}
+              />
+            </div>
+            <div className={styles.toolbarRight}>
+              <ModelSelector
+                value={selectedModel}
+                onChange={setSelectedModel}
+                disabled={loading}
+              />
+              {loading ? (
+                <button
+                  className={`${styles.sendBtn} ${styles.stopBtn}`}
+                  onClick={handleStop}
+                  title="停止生成"
+                >
+                  <StopIcon />
+                </button>
+              ) : (
+                <button
+                  className={styles.sendBtn}
+                  onClick={handleSendClick}
+                  disabled={!input.trim()}
+                  title="发送"
+                >
+                  <SendIcon />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       <HistoryPanel
         visible={historyOpen}
-        onClose={() => setHistoryOpen(false)}
+        onClose={handleCloseHistory}
         currentSessionId={sessionId}
         onSelectSession={async (id) => {
           const session = await loadSession(id);

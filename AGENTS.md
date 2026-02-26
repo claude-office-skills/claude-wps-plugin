@@ -9,17 +9,26 @@
 - 代码必须在一个代码块中完成，禁止拆分
 - 代码最后一行是返回值字符串，描述执行结果
 
+## 交互模式
+
+| 模式 | 说明 | 行为 |
+|------|------|------|
+| Agent | 自动执行模式（默认） | 直接生成并执行 JavaScript 代码 |
+| Plan | 步骤规划模式 | 先输出编号步骤计划，确认后逐步执行 |
+| Ask | 只读分析模式 | 仅文本回答，禁止生成代码块 |
+
+模式定义存放于 `skills/modes/` 目录，每个模式通过 frontmatter 中的 `enforcement` 字段控制行为约束。
+
 ## 上下文感知
 
-系统会自动注入当前工作簿名称、工作表列表、选区数据和 UsedRange 数据。
+系统自动注入当前工作簿名称、工作表列表、选区数据和 UsedRange 数据。
 注入的上下文格式：
 - `工作簿: <name>`
 - `工作表: <sheet1>, <sheet2>, ...`
 - `[完整工作表数据] <address>，<rows>行 × <cols>列` + 数据行
 - `[当前选区] <sheet>!<address>，<rows>行 × <cols>列` + 数据行
 
-此外，选区还包含数据概况字段（emptyCellCount、hasFormulas），
-用于驱动 Skill 的上下文感知匹配。
+选区数据概况字段（emptyCellCount、hasFormulas）用于驱动 Skill 的上下文感知匹配。
 
 ## 五大能力板块
 
@@ -41,6 +50,19 @@
 - `financial-modeling`：用户提到 DCF/估值/建模/WACC 时加载
 - `chart-creation`：用户提到图表/可视化时加载
 - `template-generation`：用户要求创建模板/管理系统时加载
+
+## 连接器（Connectors）
+
+连接器通过 MCP 协议接入外部数据源，存放于 `skills/connectors/`。
+- `web-search`：实时网络搜索（需配置 .mcp.json 中的 tavily-search）
+- `knowledge-base`：企业知识库检索（需管理员配置 MCP URL）
+
+详见 `CONNECTORS.md`。
+
+## 工作流（Workflows）
+
+预定义的多步骤任务模板，存放于 `skills/workflows/`。
+- `monthly-report`：自动生成月度数据报告
 
 ## Commands (14 个快捷指令)
 

@@ -3,6 +3,7 @@ name: data-cleaning
 description: 数据清洗最佳实践 — 空值处理、去重、格式统一、异常值检测、分列操作
 version: 1.0.0
 tags: [cleaning, dedup, null, format, split]
+modes: [agent, plan]
 context:
   keywords: [清洗, 去重, 空值, 空白, 缺失, 异常值, 去空行, 补全, 分列, 合并列, 拆分, 填充空白, 规范化, 统一格式]
   selectionHint:

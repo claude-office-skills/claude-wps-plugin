@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tavily-search": {
+      "type": "http",
+      "url": ""
+    },
+    "company-kb": {
+      "type": "http",
+      "url": ""
+    }
+  }
+}
