@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, useEffect, useRef, memo, useCallback } from "react";
 import type { QuickAction, InteractionMode } from "../types";
 import styles from "./QuickActionCards.module.css";
 
 const PROXY_BASE = "http://127.0.0.1:3001";
 const DEBOUNCE_MS = 1500;
+const VISIBLE_COUNT = 4;
 
 interface CommandDef {
   id: string;
@@ -135,23 +136,67 @@ const QuickActionCards = memo(function QuickActionCards({
   }, []);
 
   const modeSpecific = modeActions[mode];
-  let actions: QuickAction[];
-  if (modeSpecific) {
-    actions =
-      stableHasSelection && modeSpecific.selection.length > 0
-        ? modeSpecific.selection
-        : modeSpecific.general.length > 0
-          ? modeSpecific.general
-          : stableHasSelection
-            ? selectionCmds
-            : generalCmds;
+
+  const allActions: QuickAction[] = [];
+  const seen = new Set<string>();
+  const addUnique = (list: QuickAction[]) => {
+    for (const a of list) {
+      if (!seen.has(a.label)) {
+        seen.add(a.label);
+        allActions.push(a);
+      }
+    }
+  };
+
+  if (stableHasSelection) {
+    if (modeSpecific?.selection.length) addUnique(modeSpecific.selection);
+    addUnique(selectionCmds);
+    if (modeSpecific?.general.length) addUnique(modeSpecific.general);
+    addUnique(generalCmds);
   } else {
-    actions = stableHasSelection ? selectionCmds : generalCmds;
+    if (modeSpecific?.general.length) addUnique(modeSpecific.general);
+    addUnique(generalCmds);
+    if (modeSpecific?.selection.length) addUnique(modeSpecific.selection);
+    addUnique(selectionCmds);
   }
 
+  const actions = allActions;
+
+  // #region agent log
+  if (actions.length > 0) {
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "fc5e63",
+      },
+      body: JSON.stringify({
+        sessionId: "fc5e63",
+        location: "QuickActionCards.tsx:render",
+        message: "Actions computed",
+        data: {
+          totalActions: actions.length,
+          hasMore: actions.length > 4,
+          mode,
+          stableHasSelection,
+          labels: actions.map((a) => a.label),
+        },
+        timestamp: Date.now(),
+        hypothesisId: "D",
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
+
+  const [expanded, setExpanded] = useState(false);
+  const toggleExpand = useCallback(() => setExpanded((v) => !v), []);
+
+  const hasMore = actions.length > VISIBLE_COUNT;
+  const visibleActions = expanded ? actions : actions.slice(0, VISIBLE_COUNT);
+
   return (
-    <div className={styles.grid}>
-      {actions.map((action) => (
+    <div className={`${styles.grid} ${expanded ? styles.gridExpanded : ""}`}>
+      {visibleActions.map((action) => (
         <button
           key={action.label}
           className={styles.card}
@@ -162,6 +207,17 @@ const QuickActionCards = memo(function QuickActionCards({
           <span className={styles.cardLabel}>{action.label}</span>
         </button>
       ))}
+      {hasMore && (
+        <button
+          className={`${styles.card} ${styles.moreBtn}`}
+          onClick={toggleExpand}
+        >
+          <span className={styles.cardIcon}>{expanded ? "‹" : "›"}</span>
+          <span className={styles.cardLabel}>
+            {expanded ? "收起" : `更多+${actions.length - VISIBLE_COUNT}`}
+          </span>
+        </button>
+      )}
     </div>
   );
 });

@@ -19,10 +19,12 @@ interface Props {
     blockId: string,
     result: string,
     error?: string,
+    diff?: import("../types").DiffResult | null,
   ) => void;
   onApplyCode?: (msgId: string) => void;
   onRetryFix?: (code: string, error: string, language: string) => void;
   isApplying?: boolean;
+  onSwitchToAgent?: () => void;
 }
 
 function ThinkingSection({
@@ -163,8 +165,8 @@ function buildMarkdownComponents(
           <CodeBlock
             block={matchedBlock}
             isStreaming={isStreaming}
-            onExecuted={(blockId, result, error) =>
-              onCodeExecuted(message.id, blockId, result, error)
+            onExecuted={(blockId, result, error, diff) =>
+              onCodeExecuted(message.id, blockId, result, error, diff)
             }
             onRetryFix={onRetryFix}
           />
@@ -179,8 +181,8 @@ function buildMarkdownComponents(
             code: codeStr,
           }}
           isStreaming={isStreaming}
-          onExecuted={(blockId, result, error) =>
-            onCodeExecuted(message.id, blockId, result, error)
+          onExecuted={(blockId, result, error, diff) =>
+            onCodeExecuted(message.id, blockId, result, error, diff)
           }
           onRetryFix={onRetryFix}
         />
@@ -207,6 +209,7 @@ function MessageBubble({
   onApplyCode,
   onRetryFix,
   isApplying,
+  onSwitchToAgent,
 }: Props) {
   const isUser = message.role === "user";
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
@@ -316,6 +319,18 @@ function MessageBubble({
                 <CheckIcon /> 已应用到表格
               </span>
             )}
+          </div>
+        )}
+
+        {message.suggestAgentSwitch && onSwitchToAgent && (
+          <div className={styles.modeSwitchBanner}>
+            <span className={styles.modeSwitchIcon}>⚡</span>
+            <span className={styles.modeSwitchText}>
+              该操作需要在 Agent 模式下执行
+            </span>
+            <button className={styles.modeSwitchBtn} onClick={onSwitchToAgent}>
+              切换至 Agent
+            </button>
           </div>
         )}
 
@@ -451,6 +466,7 @@ export default memo(MessageBubble, (prev, next) => {
     prev.isApplying === next.isApplying &&
     prev.onCodeExecuted === next.onCodeExecuted &&
     prev.onApplyCode === next.onApplyCode &&
-    prev.onRetryFix === next.onRetryFix
+    prev.onRetryFix === next.onRetryFix &&
+    prev.onSwitchToAgent === next.onSwitchToAgent
   );
 });

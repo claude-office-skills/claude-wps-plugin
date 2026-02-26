@@ -8,6 +8,17 @@ import type { WpsContext, ChatMessage, AttachmentFile } from "../types";
 
 const PROXY_BASE = "http://127.0.0.1:3001";
 
+// #region agent log
+function _feDbg(loc: string, msg: string, data?: Record<string, unknown>) {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${PROXY_BASE}/wps-debug-log`, false);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.send(JSON.stringify({ sessionId: "165bed", location: `fe:${loc}`, message: msg, data: data || {}, timestamp: Date.now() }));
+  } catch {}
+}
+// #endregion
+
 /** 构建 Excel 上下文字符串 */
 function buildContextString(wpsCtx: WpsContext): string {
   const { selection, workbookName, sheetNames, usedRange } = wpsCtx;
@@ -81,7 +92,49 @@ export interface SendMessageOptions {
   mode?: string;
 }
 
-/** 流式发送消息给 Claude（通过本地代理） */
+/**
+ * SSE line parser — shared by both XHR onprogress and fetch fallback.
+ * Processes complete lines from `buffer`, dispatches callbacks, returns the
+ * remaining (possibly incomplete) tail of the buffer.
+ */
+function processSseLines(
+  buffer: string,
+  fullTextRef: { v: string },
+  callbacks: StreamCallbacks,
+): string {
+  const lines = buffer.split("\n");
+  const tail = lines.pop() ?? "";
+
+  for (const line of lines) {
+    if (!line.startsWith("data: ")) continue;
+    const data = line.slice(6).trim();
+    try {
+      const event = JSON.parse(data);
+      if (event.type === "mode") {
+        callbacks.onModeInfo?.(event.mode, event.enforcement);
+      } else if (event.type === "token") {
+        fullTextRef.v += event.text;
+        callbacks.onToken(event.text);
+      } else if (event.type === "thinking") {
+        callbacks.onThinking?.(event.text);
+      } else if (event.type === "done") {
+        if (event.fullText && !fullTextRef.v) fullTextRef.v = event.fullText;
+      } else if (event.type === "error") {
+        throw new Error(event.message);
+      }
+    } catch (parseErr) {
+      if (
+        parseErr instanceof Error &&
+        parseErr.message !== "Unexpected token"
+      ) {
+        throw parseErr;
+      }
+    }
+  }
+  return tail;
+}
+
+/** 流式发送消息给 Claude（通过本地代理） — 使用 XHR onprogress 实现流式 */
 export async function sendMessage(
   userMessage: string,
   history: ChatMessage[],
@@ -100,7 +153,6 @@ export async function sendMessage(
   ];
 
   const context = buildContextString(wpsCtx);
-  let fullText = "";
 
   const payload: Record<string, unknown> = { messages, context };
   if (options?.model) payload.model = options.model;
@@ -115,66 +167,104 @@ export async function sendMessage(
     }));
   }
 
-  try {
-    const resp = await fetch(`${PROXY_BASE}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: options?.signal,
-    });
+  const fullTextRef = { v: "" };
+  const streamStart = Date.now();
+  let progressCount = 0;
+  let prevLen = 0;
 
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      throw new Error(`代理服务器错误 ${resp.status}: ${errBody}`);
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${PROXY_BASE}/chat`, true);
+    xhr.setRequestHeader("Content-Type", "application/json");
+
+    let buffer = "";
+    let aborted = false;
+
+    if (options?.signal) {
+      options.signal.addEventListener("abort", () => {
+        aborted = true;
+        xhr.abort();
+      });
     }
 
-    const reader = resp.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+    // #region agent log
+    _feDbg("xhr-open", "XHR opening", { url: `${PROXY_BASE}/chat`, payloadLen: JSON.stringify(payload).length });
+    // #endregion
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+    xhr.onprogress = () => {
+      const newData = xhr.responseText.slice(prevLen);
+      prevLen = xhr.responseText.length;
+      if (!newData) return;
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
+      progressCount++;
+      buffer += newData;
+
+      // #region agent log
+      if (progressCount <= 3 || progressCount % 50 === 0) {
+        _feDbg("xhr-progress", "onprogress", { progressCount, newDataLen: newData.length, totalLen: prevLen, elapsed: Date.now() - streamStart, fullTextLen: fullTextRef.v.length, bufferPreview: buffer.substring(0, 200) });
+      }
+      // #endregion
+
+      try {
+        buffer = processSseLines(buffer, fullTextRef, callbacks);
+      } catch (err) {
+        // #region agent log
+        _feDbg("xhr-progress-error", "processSseLines threw", { message: (err as Error).message, fullTextLen: fullTextRef.v.length, bufferPreview: buffer.substring(0, 300) });
+        // #endregion
+        aborted = true;
+        xhr.abort();
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    xhr.onload = () => {
+      // #region agent log
+      _feDbg("xhr-onload", "XHR onload fired", { status: xhr.status, aborted, responseLen: xhr.responseText.length, fullTextLen: fullTextRef.v.length, elapsed: Date.now() - streamStart, progressCount });
+      // #endregion
+      if (aborted) return;
+      if (xhr.status !== 200) {
+        reject(new Error(`代理服务器错误 ${xhr.status}: ${xhr.responseText}`));
+        return;
+      }
+      const remaining = xhr.responseText.slice(prevLen);
+      if (remaining) {
+        buffer += remaining;
         try {
-          const event = JSON.parse(data);
-          if (event.type === "mode") {
-            callbacks.onModeInfo?.(event.mode, event.enforcement);
-          } else if (event.type === "token") {
-            fullText += event.text;
-            callbacks.onToken(event.text);
-          } else if (event.type === "thinking") {
-            callbacks.onThinking?.(event.text);
-          } else if (event.type === "done") {
-            if (event.fullText && !fullText) fullText = event.fullText;
-          } else if (event.type === "error") {
-            throw new Error(event.message);
-          }
-        } catch (parseErr) {
-          if (
-            parseErr instanceof Error &&
-            parseErr.message !== "Unexpected token"
-          ) {
-            throw parseErr;
-          }
+          processSseLines(buffer, fullTextRef, callbacks);
+        } catch (err) {
+          // #region agent log
+          _feDbg("xhr-onload-error", "processSseLines threw in onload", { message: (err as Error).message });
+          // #endregion
+          reject(err instanceof Error ? err : new Error(String(err)));
+          return;
         }
       }
-    }
+      callbacks.onComplete(fullTextRef.v);
+      resolve();
+    };
 
-    callbacks.onComplete(fullText);
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      callbacks.onComplete(fullText || "（已中止生成）");
-      return;
-    }
-    callbacks.onError(err instanceof Error ? err : new Error(String(err)));
-  }
+    xhr.onerror = () => {
+      // #region agent log
+      _feDbg("xhr-onerror", "XHR onerror fired", { aborted, readyState: xhr.readyState, status: xhr.status, fullTextLen: fullTextRef.v.length, elapsed: Date.now() - streamStart, progressCount });
+      // #endregion
+      if (aborted) {
+        callbacks.onComplete(fullTextRef.v || "（已中止生成）");
+        resolve();
+        return;
+      }
+      reject(new Error("无法连接代理服务器，请检查 proxy-server 是否运行"));
+    };
+
+    xhr.onabort = () => {
+      // #region agent log
+      _feDbg("xhr-onabort", "XHR onabort fired", { fullTextLen: fullTextRef.v.length, elapsed: Date.now() - streamStart, progressCount });
+      // #endregion
+      callbacks.onComplete(fullTextRef.v || "（已中止生成）");
+      resolve();
+    };
+
+    xhr.send(JSON.stringify(payload));
+  });
 }
 
 /** 从 Claude 回复文本中提取代码块 */

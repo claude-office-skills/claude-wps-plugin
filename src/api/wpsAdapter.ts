@@ -47,7 +47,14 @@ export async function getWpsContext(): Promise<WpsContext> {
 const CODE_RESULT_POLL_MS = 300;
 const CODE_RESULT_TIMEOUT_MS = 30000;
 
-export async function executeCode(code: string): Promise<string> {
+import type { DiffResult, AddToChatPayload } from "../types";
+
+export interface ExecuteResult {
+  result: string;
+  diff: DiffResult | null;
+}
+
+export async function executeCode(code: string): Promise<ExecuteResult> {
   const submitRes = await fetch(`${PROXY_URL}/execute-code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -74,10 +81,25 @@ export async function executeCode(code: string): Promise<string> {
     if (data.error) {
       throw new Error(data.error);
     }
-    return data.result ?? "执行成功";
+    return {
+      result: data.result ?? "执行成功",
+      diff: data.diff ?? null,
+    };
   }
 
   throw new Error("代码执行超时（30秒）");
+}
+
+export async function pollAddToChat(): Promise<AddToChatPayload | null> {
+  try {
+    const res = await fetch(`${PROXY_URL}/add-to-chat/poll`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.pending) return null;
+    return data as AddToChatPayload;
+  } catch {
+    return null;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

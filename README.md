@@ -370,6 +370,13 @@ chore: 构建/工具链
 
 参见 [自定义与扩展](#自定义与扩展) 部分，所有技能均为 Markdown 文件，无需修改代码。
 
+## 相关项目
+
+| 项目 | 说明 |
+|------|------|
+| [claude-wps-ppt-plugin](https://github.com/claude-office-skills/claude-wps-ppt-plugin) | Claude for WPS PowerPoint |
+| [claude-wps-word-plugin](https://github.com/claude-office-skills/claude-wps-word-plugin) | Claude for WPS Word |
+
 ## License
 
 [MIT](./LICENSE)

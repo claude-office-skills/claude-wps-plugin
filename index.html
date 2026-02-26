@@ -7,7 +7,13 @@
     <title>claude-wps-plugin</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="_loading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#217346;background:#1a1a2e;">
+        <style>@keyframes _spin{to{transform:rotate(360deg)}}</style>
+        <div style="width:36px;height:36px;border:3px solid rgba(33,115,70,0.2);border-top-color:#217346;border-radius:50%;animation:_spin .8s linear infinite;margin-bottom:16px;"></div>
+        <div style="font-size:14px;opacity:0.8;">Claude for Excel 加载中...</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <!-- WPS 加载项 ribbon 绑定脚本：WPS 加载本页时执行，注册 ribbon 按钮回调 -->
     <script src="/main.js"></script>

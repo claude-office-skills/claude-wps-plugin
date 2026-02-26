@@ -18,6 +18,7 @@ import {
   readdirSync,
   existsSync,
   unlinkSync,
+  appendFileSync,
 } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, resolve } from "path";
@@ -25,8 +26,51 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
+const yaml = require("js-yaml");
+
+// #region agent log
+const __debug_dir = dirname(fileURLToPath(import.meta.url));
+const __debug_log = join(__debug_dir, "debug-165bed.log");
+function _dbg(loc, msg, data) {
+  try {
+    appendFileSync(__debug_log, JSON.stringify({ sessionId: "165bed", location: loc, message: msg, data, timestamp: Date.now() }) + "\n");
+  } catch (_) {}
+}
+_dbg("proxy-server.js:startup", "Proxy server module loaded successfully", { nodeVersion: process.version, pid: process.pid });
+// #endregion
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function resolveClaudePath() {
+  if (process.env.CLAUDE_PATH && existsSync(process.env.CLAUDE_PATH)) {
+    return process.env.CLAUDE_PATH;
+  }
+  try {
+    const found = execSync("which claude 2>/dev/null || command -v claude 2>/dev/null", {
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
+    if (found && existsSync(found)) return found;
+  } catch {}
+
+  const home = process.env.HOME || "/root";
+  const candidates = [
+    join(home, ".nvm/versions/node", process.version, "bin/claude"),
+    join(dirname(process.execPath), "claude"),
+    "/usr/local/bin/claude",
+    join(home, ".npm-global/bin/claude"),
+    join(home, ".claude/local/claude"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return "claude";
+}
+
+const RESOLVED_CLAUDE_PATH = resolveClaudePath();
+// #region agent log
+_dbg("proxy-server.js:claude-path", "Claude CLI resolved", { path: RESOLVED_CLAUDE_PATH, exists: existsSync(RESOLVED_CLAUDE_PATH) });
+// #endregion
 
 function isPathSafe(filePath, allowedDir) {
   const resolved = resolve(filePath);
@@ -68,48 +112,12 @@ function parseFrontmatter(raw) {
   const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: raw };
 
-  const fm = {};
-  let currentKey = null;
-  let currentIndent = 0;
-
-  for (const line of match[1].split("\n")) {
-    const kvMatch = line.match(/^(\w[\w-]*):\s*(.*)$/);
-    if (kvMatch) {
-      const [, key, val] = kvMatch;
-      if (val.startsWith("[") && val.endsWith("]")) {
-        fm[key] = val
-          .slice(1, -1)
-          .split(",")
-          .map((s) => s.trim());
-      } else if (val === "" || val === undefined) {
-        fm[key] = {};
-        currentKey = key;
-        currentIndent = 0;
-      } else {
-        fm[key] = val;
-      }
-    } else if (currentKey && line.startsWith("  ")) {
-      const nested = line.match(/^\s+(\w[\w-]*):\s*(.*)$/);
-      if (nested) {
-        const [, nk, nv] = nested;
-        if (typeof fm[currentKey] !== "object") fm[currentKey] = {};
-        if (nv.startsWith("[") && nv.endsWith("]")) {
-          fm[currentKey][nk] = nv
-            .slice(1, -1)
-            .split(",")
-            .map((s) => s.trim());
-        } else if (nv === "true") {
-          fm[currentKey][nk] = true;
-        } else if (nv === "false") {
-          fm[currentKey][nk] = false;
-        } else {
-          fm[currentKey][nk] = nv;
-        }
-      }
-    }
+  try {
+    const fm = yaml.load(match[1]) || {};
+    return { frontmatter: fm, body: match[2].trim() };
+  } catch {
+    return { frontmatter: {}, body: match[2].trim() };
   }
-
-  return { frontmatter: fm, body: match[2].trim() };
 }
 
 function matchSkills(allSkills, userMessage, wpsContext, mode) {
@@ -291,7 +299,28 @@ function buildSystemPrompt(skills, todayStr, userMessage, modeSkill) {
 你生成的 JavaScript 代码总长度必须控制在 3000 字符以内。超长代码会被截断导致语法错误！
 - 生成超过 20 行数据时，必须用「小数组 + for 循环 + Math.random()」随机组合生成
 - 绝对禁止硬编码大量数据行（如手动写 100+ 行数组）
-- 使用 ws.Range().Value2 批量写入（二维数组一次写多行），避免逐行写入
+
+## ⚠️ 逐行流式写入格式（必须遵守）
+写入多行数据到单元格时，你必须使用逐行分块格式，让用户看到数据逐行出现的动画效果。
+规则：
+1. 代码开头放变量声明（序言），如 var ws = Application.ActiveSheet;
+2. 用 \`// ---ROW---\` 标记分隔每一行数据的写入（标记必须独占一行）
+3. 每个 ROW 分块写入一行的所有单元格（用 ws.Range("X").Value2 = ...）
+4. 不要使用二维数组批量写入（禁止 Range.Value2 = [[...]]），必须逐单元格赋值
+5. \`// ---ROW---\` 标记只能出现在顶层语句之间，绝对不能放在 for/while/if 的花括号 {} 内部
+6. 20 行以内的数据，逐行硬编码每一行，用 \`// ---ROW---\` 分隔
+7. 超过 20 行的数据，用 for 循环 + 小数组随机生成，不需要加 \`// ---ROW---\`
+
+示例（写入 3 行 2 列的表格）：
+\`\`\`
+var ws = Application.ActiveSheet;
+// ---ROW---
+ws.Range("A1").Value2 = "姓名"; ws.Range("B1").Value2 = "年龄";
+// ---ROW---
+ws.Range("A2").Value2 = "张三"; ws.Range("B2").Value2 = 25;
+// ---ROW---
+ws.Range("A3").Value2 = "李四"; ws.Range("B3").Value2 = 30;
+\`\`\`
 
 ## ⚠️ 始终使用 ActiveSheet（必须遵守）
 操作当前表时，必须用 var ws = Application.ActiveSheet; 绝对不要用 wb.Sheets.Item("表名") 硬编码 sheet 名称（用户可能已重命名 sheet，会导致操作错误的表或报错）。
@@ -373,14 +402,35 @@ app.use(
 app.use(express.json({ limit: "50mb" }));
 
 const distPath = join(__dirname, "dist");
+// #region agent log
+_dbg("proxy-server.js:static", "Checking dist path", { distPath, exists: existsSync(distPath) });
+// #endregion
 if (existsSync(distPath)) {
   app.use(express.static(distPath));
 }
 
 const wpsAddonPath = join(__dirname, "wps-addon");
+// #region agent log
+_dbg("proxy-server.js:static", "Checking wps-addon path", { wpsAddonPath, exists: existsSync(wpsAddonPath) });
+// #endregion
 if (existsSync(wpsAddonPath)) {
-  app.use("/wps-addon", express.static(wpsAddonPath));
+  app.use("/wps-addon", express.static(wpsAddonPath, {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    },
+  }));
 }
+
+// #region agent log
+app.use((req, res, next) => {
+  _dbg("proxy-server.js:request", "Incoming request", { method: req.method, url: req.url, origin: req.headers.origin || "none" });
+  next();
+});
+// #endregion
 
 // ── 系统剪贴板读取（macOS）─────────────────────────────────────
 app.get("/clipboard", (req, res) => {
@@ -715,14 +765,37 @@ app.get("/wps-context", (req, res) => {
 let _codeQueue = [];
 let _codeResults = {};
 let _codeIdCounter = 0;
+let _codeChunkMap = {};
 
 app.post("/execute-code", (req, res) => {
   const { code } = req.body;
   if (!code) return res.status(400).json({ error: "code 不能为空" });
 
-  const id = `exec-${++_codeIdCounter}-${Date.now()}`;
-  _codeQueue.push({ id, code, submittedAt: Date.now() });
-  res.json({ ok: true, id });
+  const parentId = `exec-${++_codeIdCounter}-${Date.now()}`;
+
+  if (code.includes("// ---ROW---")) {
+    const parts = code.split("// ---ROW---");
+    const preamble = parts[0].trim();
+    const rowChunks = parts.slice(1).map((p) => p.trim()).filter(Boolean);
+
+    if (rowChunks.length > 1) {
+      const chunkIds = [];
+      for (let i = 0; i < rowChunks.length; i++) {
+        const chunkId = `${parentId}_chunk_${i}`;
+        const chunkCode = preamble + "\n" + rowChunks[i];
+        _codeQueue.push({ id: chunkId, code: chunkCode, submittedAt: Date.now() });
+        chunkIds.push(chunkId);
+      }
+      _codeChunkMap[parentId] = { chunkIds, total: chunkIds.length, completed: 0, errors: [], diffs: [] };
+      // #region agent log
+      _dbg("proxy:execute-code", "Split into ROW chunks", { parentId, chunkCount: chunkIds.length, preambleLen: preamble.length });
+      // #endregion
+      return res.json({ ok: true, id: parentId });
+    }
+  }
+
+  _codeQueue.push({ id: parentId, code, submittedAt: Date.now() });
+  res.json({ ok: true, id: parentId });
 });
 
 app.get("/pending-code", (req, res) => {
@@ -734,12 +807,38 @@ app.get("/pending-code", (req, res) => {
 });
 
 app.post("/code-result", (req, res) => {
-  const { id, result, error } = req.body;
+  const { id, result, error, diff } = req.body;
   if (!id) return res.status(400).json({ error: "id 不能为空" });
+
+  const chunkMatch = id.match(/^(.+)_chunk_\d+$/);
+  if (chunkMatch) {
+    const parentId = chunkMatch[1];
+    const parent = _codeChunkMap[parentId];
+    if (parent) {
+      parent.completed++;
+      if (error) parent.errors.push(error);
+      if (diff) parent.diffs.push(diff);
+
+      if (parent.completed >= parent.total) {
+        const mergedDiff = parent.diffs.length > 0
+          ? { changeCount: parent.diffs.reduce((s, d) => s + (d.changeCount || 0), 0), changes: parent.diffs.flatMap((d) => d.changes || []) }
+          : null;
+        _codeResults[parentId] = {
+          result: parent.errors.length > 0 ? null : (result ?? "执行成功"),
+          error: parent.errors.length > 0 ? parent.errors.join("; ") : null,
+          diff: mergedDiff,
+          completedAt: Date.now(),
+        };
+        setTimeout(() => { delete _codeResults[parentId]; delete _codeChunkMap[parentId]; }, 60000);
+      }
+    }
+    return res.json({ ok: true });
+  }
 
   _codeResults[id] = {
     result: result ?? null,
     error: error ?? null,
+    diff: diff ?? null,
     completedAt: Date.now(),
   };
 
@@ -753,6 +852,23 @@ app.get("/code-result/:id", (req, res) => {
   const entry = _codeResults[req.params.id];
   if (!entry) return res.json({ ready: false });
   res.json({ ready: true, ...entry });
+});
+
+// ── Add to Chat（右键菜单数据） ────────────────────────────
+let _addToChatQueue = [];
+
+app.post("/add-to-chat", (req, res) => {
+  _addToChatQueue.push({ ...req.body, receivedAt: Date.now() });
+  if (_addToChatQueue.length > 10) _addToChatQueue.shift();
+  res.json({ ok: true });
+});
+
+app.get("/add-to-chat/poll", (_req, res) => {
+  if (_addToChatQueue.length === 0) {
+    return res.json({ pending: false });
+  }
+  const item = _addToChatQueue.shift();
+  res.json({ pending: true, ...item });
 });
 
 // ── 模型白名单 ──────────────────────────────────────────────
@@ -775,6 +891,26 @@ app.post("/chat", (req, res) => {
   const currentMode = mode || "agent";
   const modeSkill = ALL_MODES.get(currentMode) || ALL_MODES.get("agent");
   const enforcement = modeSkill?.enforcement || {};
+  // #region agent log
+  try {
+    require("fs").appendFileSync(
+      "/Users/kingsoft/需求讨论/.cursor/debug-fc5e63.log",
+      JSON.stringify({
+        sessionId: "fc5e63",
+        location: "proxy-server.js:chat",
+        message: "Chat request received",
+        data: {
+          mode,
+          currentMode,
+          enforcement,
+          modeSkillName: modeSkill?.name,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "D",
+      }) + "\n",
+    );
+  } catch {}
+  // #endregion
   const skipCodeBridge =
     enforcement.codeBridge === false || enforcement.codeBridge === "false";
 
@@ -864,6 +1000,7 @@ app.post("/chat", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   // SSE keepalive: prevent browser/WebView timeout during CLI startup
@@ -873,7 +1010,7 @@ app.post("/chat", (req, res) => {
     }
   }, 5000);
 
-  const claudePath = process.env.CLAUDE_PATH || "claude";
+  const claudePath = RESOLVED_CLAUDE_PATH;
   const maxTurns = String(
     enforcement.maxTurns || (currentMode === "ask" ? 1 : 5),
   );
@@ -892,7 +1029,17 @@ app.post("/chat", (req, res) => {
   if (webSearch) {
     cliArgs.push("--allowedTools", "WebSearch");
   }
+  // #region agent log
+  _dbg("proxy-server.js:chat-spawn", "Spawning claude CLI", { claudePath, cliArgs, promptLen: fullPrompt.length });
+  // #endregion
+
   const child = spawn(claudePath, cliArgs, { env: { ...process.env } });
+
+  // #region agent log
+  child.on("error", (err) => {
+    _dbg("proxy-server.js:chat-spawn-error", "Spawn error", { message: err.message, code: err.code });
+  });
+  // #endregion
 
   res.write(
     `data: ${JSON.stringify({ type: "mode", mode: currentMode, enforcement })}\n\n`,
@@ -952,11 +1099,26 @@ app.post("/chat", (req, res) => {
     }
   });
 
+  // #region agent log
+  let _stderrBuf = "";
+  // #endregion
   child.stderr.on("data", (data) => {
-    console.error("[proxy] stderr:", data.toString().trim());
+    const chunk = data.toString().trim();
+    // #region agent log
+    _stderrBuf += chunk + "\n";
+    _dbg("proxy-server.js:chat-stderr", "CLI stderr", { chunk: chunk.substring(0, 500) });
+    // #endregion
+    console.error("[proxy] stderr:", chunk);
   });
 
   child.on("close", (code, signal) => {
+    // #region agent log
+    _dbg("proxy-server.js:chat-close", "CLI process closed", {
+      code, signal, resultTextLen: resultText.length, tokenCount: _tokenCount,
+      stderrPreview: _stderrBuf.substring(0, 500),
+      elapsed: Date.now() - _streamStartTime,
+    });
+    // #endregion
     if (code !== 0 && !resultText) {
       res.write(
         `data: ${JSON.stringify({ type: "error", message: `claude CLI 退出 (code=${code}, signal=${signal})，请确认已登录：运行 claude 命令` })}\n\n`,
@@ -987,6 +1149,28 @@ app.post("/chat", (req, res) => {
   });
 });
 
+// #region agent log
+app.post("/wps-debug-log", (req, res) => {
+  _dbg("wps-addon:" + (req.body.location || "unknown"), req.body.message || "wps log", req.body.data || {});
+  res.json({ ok: true });
+});
+
+app.get("/debug-status", (req, res) => {
+  const status = {
+    proxy: "running",
+    nodeVersion: process.version,
+    distExists: existsSync(distPath),
+    wpsAddonExists: existsSync(wpsAddonPath),
+    distFiles: existsSync(distPath) ? readdirSync(distPath) : [],
+    wpsAddonFiles: existsSync(wpsAddonPath) ? readdirSync(wpsAddonPath) : [],
+    uptime: process.uptime(),
+    pid: process.pid,
+  };
+  _dbg("proxy-server.js:debug-status", "Debug status requested", status);
+  res.json(status);
+});
+// #endregion
+
 if (existsSync(distPath)) {
   app.get("/{*path}", (req, res) => {
     res.sendFile(join(distPath, "index.html"));
@@ -994,6 +1178,9 @@ if (existsSync(distPath)) {
 }
 
 app.listen(PORT, "127.0.0.1", () => {
+  // #region agent log
+  _dbg("proxy-server.js:listen", "Server started", { port: PORT, distExists: existsSync(distPath), wpsAddonExists: existsSync(wpsAddonPath) });
+  // #endregion
   console.log(`\n✅ WPS Claude 代理服务器已启动`);
   console.log(`   地址: http://127.0.0.1:${PORT}`);
   console.log(`   健康检查: http://127.0.0.1:${PORT}/health`);

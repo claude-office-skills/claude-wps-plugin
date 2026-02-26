@@ -30,6 +30,7 @@ export interface ChatMessage {
   isError?: boolean;
   thinkingMs?: number;
   thinkingContent?: string;
+  suggestAgentSwitch?: boolean;
 }
 
 export interface CodeBlock {
@@ -39,6 +40,7 @@ export interface CodeBlock {
   executed?: boolean;
   result?: string;
   error?: string;
+  diff?: DiffResult | null;
 }
 
 export interface SelectionContext {
@@ -113,4 +115,27 @@ export interface QuickAction {
   icon: string;
   label: string;
   prompt: string;
+}
+
+export interface CellChange {
+  cell: string;
+  row: number;
+  col: number;
+  before: string | number | boolean | null;
+  after: string | number | boolean | null;
+}
+
+export interface DiffResult {
+  sheetName: string;
+  changeCount: number;
+  changes: CellChange[];
+  hasMore: boolean;
+}
+
+export interface AddToChatPayload {
+  address: string;
+  sheetName: string;
+  rowCount: number;
+  colCount: number;
+  values: (string | number | boolean | null)[][];
 }

@@ -12,6 +12,11 @@
   display: none;
 }
 
+.gridExpanded {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
 .card {
   display: flex;
   align-items: center;
@@ -53,4 +58,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.moreBtn {
+  background: transparent;
+  border: 1px dashed #555;
+}
+
+.moreBtn:hover:not(:disabled) {
+  background: #2d2d2d;
+  border-color: #777;
 }

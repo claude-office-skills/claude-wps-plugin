@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { nanoid } from "nanoid";
 import { Claude } from "@lobehub/icons";
 import MessageBubble from "./components/MessageBubble";
@@ -13,6 +13,7 @@ import {
   onSelectionChange,
   isWpsAvailable,
   executeCode,
+  pollAddToChat,
 } from "./api/wpsAdapter";
 import {
   saveSession,
@@ -91,27 +92,58 @@ export default function App() {
 
   // 检查代理服务器是否在运行（带重试）
   useEffect(() => {
-    let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
 
-    const check = async () => {
+    const poll = async () => {
+      if (stopped) return;
       const ok = await checkProxy();
-      if (ok) {
-        setProxyMissing(false);
-        return;
-      }
-      attempts++;
-      if (attempts < 10) {
-        timer = setTimeout(check, 2000);
-      } else {
-        setProxyMissing(true);
-      }
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc5e63'},body:JSON.stringify({sessionId:'fc5e63',location:'App.tsx:healthPoll',message:'Health check result',data:{ok,stopped},timestamp:Date.now(),hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+      setProxyMissing(!ok);
+      timer = setTimeout(poll, ok ? 30000 : 3000);
     };
 
-    check();
+    poll();
     return () => {
+      stopped = true;
       if (timer) clearTimeout(timer);
     };
+  }, []);
+
+  // 轮询右键 "Add to Chat" 事件
+  useEffect(() => {
+    let stopped = false;
+    const poll = async () => {
+      if (stopped) return;
+      try {
+        const data = await pollAddToChat();
+        if (data) {
+          const label = `${data.sheetName}!${data.address}`;
+          const rows = data.values
+            .slice(0, 10)
+            .map((r) => r.join("\t"))
+            .join("\n");
+          const preview = data.rowCount > 10 ? rows + `\n... (共 ${data.rowCount} 行)` : rows;
+          setInput((prev) =>
+            prev
+              ? `${prev}\n\n📎 [${label}]\n${preview}`
+              : `📎 [${label}]\n${preview}`,
+          );
+          setPinnedSelection({
+            label,
+            address: data.address,
+            sheetName: data.sheetName,
+            rowCount: data.rowCount,
+            colCount: data.colCount,
+          });
+        }
+      } catch { /* ignore */ }
+      if (!stopped) setTimeout(poll, 1000);
+    };
+    poll();
+    return () => { stopped = true; };
   }, []);
 
   // 启动时恢复最近会话
@@ -195,12 +227,12 @@ export default function App() {
   }, [messages]);
 
   const handleCodeExecuted = useCallback(
-    (msgId: string, blockId: string, result: string, error?: string) => {
+    (msgId: string, blockId: string, result: string, error?: string, diff?: import("./types").DiffResult | null) => {
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== msgId) return msg;
           const updatedBlocks = msg.codeBlocks?.map((b) =>
-            b.id === blockId ? { ...b, executed: true, result, error } : b,
+            b.id === blockId ? { ...b, executed: true, result, error, diff } : b,
           );
           return { ...msg, codeBlocks: updatedBlocks };
         }),
@@ -221,12 +253,12 @@ export default function App() {
 
     for (const block of blocks) {
       try {
-        const result = await executeCode(block.code);
+        const { result, diff } = await executeCode(block.code);
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== msgId) return m;
             const updated = m.codeBlocks?.map((b) =>
-              b.id === block.id ? { ...b, executed: true, result } : b,
+              b.id === block.id ? { ...b, executed: true, result, diff } : b,
             );
             return { ...m, codeBlocks: updated };
           }),
@@ -295,6 +327,23 @@ ${code}
   }, [wpsCtx]);
 
   const handleModeChange = useCallback((mode: InteractionMode) => {
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "fc5e63",
+      },
+      body: JSON.stringify({
+        sessionId: "fc5e63",
+        location: "App.tsx:handleModeChange",
+        message: "Mode changed",
+        data: { newMode: mode },
+        timestamp: Date.now(),
+        hypothesisId: "A",
+      }),
+    }).catch(() => {});
+    // #endregion
     setCurrentMode(mode);
     localStorage.setItem("wps-claude-mode", mode);
   }, []);
@@ -345,6 +394,11 @@ ${code}
     setApplyingMsgId(null);
     setPinnedSelection(null);
     setAttachedFiles([]);
+  }, []);
+
+  const handleSwitchToAgent = useCallback(() => {
+    setCurrentMode("agent");
+    localStorage.setItem("wps-claude-mode", "agent");
   }, []);
 
   const handleSend = async (text?: string) => {
@@ -404,7 +458,24 @@ ${code}
     const thinkingStart = Date.now();
     let firstTokenReceived = false;
 
-    const isAskMode = currentMode === "ask";
+    const modeSnapshot = currentMode;
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "fc5e63",
+      },
+      body: JSON.stringify({
+        sessionId: "fc5e63",
+        location: "App.tsx:handleSend",
+        message: "Sending with mode",
+        data: { modeSnapshot, currentMode },
+        timestamp: Date.now(),
+        hypothesisId: "B",
+      }),
+    }).catch(() => {});
+    // #endregion
 
     await sendMessage(
       userText,
@@ -427,6 +498,10 @@ ${code}
           if (!firstTokenReceived) {
             firstTokenReceived = true;
             updates.thinkingMs = Date.now() - thinkingStart;
+            setProxyMissing(false);
+            // #region agent log
+            fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'38bc8c'},body:JSON.stringify({sessionId:'38bc8c',location:'App.tsx:onToken:first',message:'First token received',data:{tokenLen:token.length,elapsed:Date.now()-thinkingStart},timestamp:Date.now(),hypothesisId:'H-stream-1'})}).catch(()=>{});
+            // #endregion
           }
           setMessages((prev) =>
             prev.map((m) =>
@@ -435,7 +510,64 @@ ${code}
           );
         },
         onComplete: async (text) => {
-          const rawBlocks = isAskMode ? [] : extractCodeBlocks(text);
+          // #region agent log
+          const hasCodeBlocks = /```[\s\S]*?```/.test(text);
+          fetch(
+            "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "fc5e63",
+              },
+              body: JSON.stringify({
+                sessionId: "fc5e63",
+                location: "App.tsx:onComplete",
+                message: "Response complete",
+                data: {
+                  modeSnapshot,
+                  textLen: text.length,
+                  hasCodeBlocks,
+                  first100: text.slice(0, 100),
+                },
+                timestamp: Date.now(),
+                hypothesisId: "C",
+              }),
+            },
+          ).catch(() => {});
+          // #endregion
+          // #region agent log
+          fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc5e63'},body:JSON.stringify({sessionId:'fc5e63',location:'App.tsx:onComplete:modeCheck',message:'Mode branch decision',data:{modeSnapshot,isAskBranch:modeSnapshot==="ask",textLen:text.length,hasCodePattern:/```[\w]*\n/.test(text)},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
+          if (modeSnapshot === "ask") {
+            const strippedText = text.replace(
+              /```[\w]*\n[\s\S]*?```/g,
+              "_(此处为代码操作，请切换至 Agent 模式执行)_",
+            );
+
+            const hadCode = strippedText !== text;
+            const ACTION_HINTS =
+              /切换.{0,4}Agent|switch.{0,6}agent|需要执行|需要操作|建议.{0,4}Agent/i;
+            const suggestSwitch = hadCode || ACTION_HINTS.test(text);
+
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: strippedText,
+                      isStreaming: false,
+                      codeBlocks: [],
+                      suggestAgentSwitch: suggestSwitch,
+                    }
+                  : m,
+              ),
+            );
+            setLoading(false);
+            return;
+          }
+
+          const rawBlocks = extractCodeBlocks(text);
           const codeBlocks: CodeBlock[] = rawBlocks.map((b) => ({
             id: nanoid(),
             language: b.language,
@@ -451,17 +583,22 @@ ${code}
           );
           setLoading(false);
 
-          if (codeBlocks.length > 0) {
+          const shouldAutoExecute = modeSnapshot === "agent";
+          // #region agent log
+          fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc5e63'},body:JSON.stringify({sessionId:'fc5e63',location:'App.tsx:autoExec',message:'Auto-execute decision',data:{modeSnapshot,shouldAutoExecute,codeBlockCount:codeBlocks.length,firstBlockLang:codeBlocks[0]?.language,firstBlockFirst80:codeBlocks[0]?.code?.slice(0,80)},timestamp:Date.now(),hypothesisId:'G'})}).catch(()=>{});
+          // #endregion
+
+          if (shouldAutoExecute && codeBlocks.length > 0) {
             setApplyingMsgId(assistantMsgId);
             for (let _bi = 0; _bi < codeBlocks.length; _bi++) {
               const block = codeBlocks[_bi];
               try {
-                const result = await executeCode(block.code);
+                const { result, diff } = await executeCode(block.code);
                 setMessages((prev) =>
                   prev.map((m) => {
                     if (m.id !== assistantMsgId) return m;
                     const updated = m.codeBlocks?.map((b) =>
-                      b.id === block.id ? { ...b, executed: true, result } : b,
+                      b.id === block.id ? { ...b, executed: true, result, diff } : b,
                     );
                     return { ...m, codeBlocks: updated };
                   }),
@@ -650,11 +787,38 @@ ${code}
     }
   };
 
+  const insertTextAtCursor = (pasteText: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    setInput((prev) => prev.slice(0, start) + pasteText + prev.slice(end));
+    requestAnimationFrame(() => {
+      const pos = start + pasteText.length;
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = pos;
+        textareaRef.current.selectionEnd = pos;
+      }
+    });
+  };
+
+  const fallbackNativePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) insertTextAtCursor(text);
+    } catch {
+      /* native clipboard also unavailable */
+    }
+  };
+
   const pasteViaProxy = async () => {
     try {
       const resp = await fetch("http://127.0.0.1:3001/clipboard");
       const data = await resp.json();
-      if (!data.ok) return;
+      if (!data.ok) {
+        await fallbackNativePaste();
+        return;
+      }
 
       if (data.type === "image" && data.filePath) {
         const fileName = data.fileName || `clipboard-${Date.now()}.png`;
@@ -672,22 +836,10 @@ ${code}
       }
 
       if (data.text) {
-        const ta = textareaRef.current;
-        if (!ta) return;
-        const start = ta.selectionStart;
-        const end = ta.selectionEnd;
-        const pasteText = data.text;
-        setInput((prev) => prev.slice(0, start) + pasteText + prev.slice(end));
-        requestAnimationFrame(() => {
-          const pos = start + pasteText.length;
-          if (textareaRef.current) {
-            textareaRef.current.selectionStart = pos;
-            textareaRef.current.selectionEnd = pos;
-          }
-        });
+        insertTextAtCursor(data.text);
       }
     } catch {
-      /* proxy unreachable */
+      await fallbackNativePaste();
     }
   };
 
@@ -771,7 +923,7 @@ ${code}
           <div className={styles.logoIcon}>
             <Claude.Color size={20} />
           </div>
-          <div className={styles.logoName}>Claude for WPS</div>
+          <div className={styles.logoName}>Claude for Excel</div>
           <span className={styles.betaBadge}>Beta</span>
         </div>
         <div className={styles.headerActions}>
@@ -830,6 +982,7 @@ ${code}
             onApplyCode={handleApplyCode}
             onRetryFix={handleRetryFix}
             isApplying={applyingMsgId === msg.id}
+            onSwitchToAgent={handleSwitchToAgent}
           />
         ))}
         <div ref={bottomRef} />
