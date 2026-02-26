@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import type { ModelOption } from "../types";
 import { MODEL_OPTIONS } from "../types";
 import styles from "./ModelSelector.module.css";
@@ -9,7 +9,11 @@ interface Props {
   disabled?: boolean;
 }
 
-export default function ModelSelector({ value, onChange, disabled }: Props) {
+const ModelSelector = memo(function ModelSelector({
+  value,
+  onChange,
+  disabled,
+}: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -64,4 +68,6 @@ export default function ModelSelector({ value, onChange, disabled }: Props) {
       )}
     </div>
   );
-}
+});
+
+export default ModelSelector;

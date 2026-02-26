@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import type { AttachmentFile } from "../types";
 import styles from "./AttachmentMenu.module.css";
 
