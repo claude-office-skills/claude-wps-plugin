@@ -5,6 +5,7 @@ import MessageBubble from "./components/MessageBubble";
 import ModelSelector from "./components/ModelSelector";
 import AttachmentMenu from "./components/AttachmentMenu";
 import QuickActionCards from "./components/QuickActionCards";
+import HistoryPanel from "./components/HistoryPanel";
 import { sendMessage, extractCodeBlocks, checkProxy } from "./api/claudeClient";
 import {
   getWpsContext,
@@ -12,6 +13,12 @@ import {
   isWpsAvailable,
   executeCode,
 } from "./api/wpsAdapter";
+import {
+  saveSession,
+  loadSession,
+  listSessions,
+  generateTitle,
+} from "./api/sessionStore";
 import type {
   ChatMessage,
   WpsContext,
@@ -46,10 +53,14 @@ export default function App() {
     colCount: number;
   } | null>(null);
 
+  const [sessionId, setSessionId] = useState<string>(nanoid());
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
   const lastSentInputRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 初始化：获取 WPS 上下文 + 订阅选区变化
   useEffect(() => {
@@ -69,12 +80,68 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // 检查代理服务器是否在运行
+  // 检查代理服务器是否在运行（带重试）
   useEffect(() => {
-    checkProxy().then((ok) => {
-      if (!ok) setProxyMissing(true);
-    });
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const check = async () => {
+      const ok = await checkProxy();
+      if (ok) {
+        setProxyMissing(false);
+        return;
+      }
+      attempts++;
+      if (attempts < 10) {
+        timer = setTimeout(check, 2000);
+      } else {
+        setProxyMissing(true);
+      }
+    };
+
+    check();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, []);
+
+  // 启动时恢复最近会话
+  useEffect(() => {
+    const restoreLastSession = async () => {
+      try {
+        const sessions = await listSessions();
+        if (sessions.length === 0) return;
+        const latest = sessions[0];
+        const session = await loadSession(latest.id);
+        if (!session || !session.messages || session.messages.length === 0)
+          return;
+        setSessionId(session.id);
+        setMessages([WELCOME_MESSAGE, ...session.messages]);
+        if (session.model) setSelectedModel(session.model);
+      } catch {
+        // ignore
+      }
+    };
+    restoreLastSession();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 自动保存：消息变化后 1 秒去抖保存
+  useEffect(() => {
+    const realMessages = messages.filter((m) => m.id !== "welcome");
+    if (realMessages.length === 0) return;
+    const hasStreaming = realMessages.some((m) => m.isStreaming);
+    if (hasStreaming) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const title = generateTitle(realMessages);
+      saveSession(sessionId, realMessages, { title, model: selectedModel });
+    }, 1000);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [messages, sessionId, selectedModel]);
 
   // 全局 Cmd+C：WPS WebView 中原生 copy 不生效，手动写入剪贴板
   useEffect(() => {
@@ -175,6 +242,28 @@ export default function App() {
     [messages],
   );
 
+  const handleRetryFix = (code: string, error: string, language: string) => {
+    if (loading) return;
+    const fixPrompt = `代码执行出错，请修复以下所有错误并重新生成完整代码。
+
+**错误信息：**
+\`\`\`
+${error}
+\`\`\`
+
+**原始代码（${language}）：**
+\`\`\`${language}
+${code}
+\`\`\`
+
+请修复所有问题，生成可直接执行的完整代码。注意：
+1. 修复必须覆盖所有列和所有行的相关操作，不能遗漏
+2. 使用 WPS 兼容的 API（避免 .Borders、FormatConditions 不支持的参数等）
+3. 对可能失败的操作添加 try/catch 保护
+4. 必须使用 Application.ActiveSheet 而不是硬编码 sheet 名称`;
+    handleSend(fixPrompt);
+  };
+
   const handlePinSelection = useCallback(() => {
     if (!wpsCtx?.selection) return;
     const sel = wpsCtx.selection;
@@ -212,7 +301,18 @@ export default function App() {
       displayContent += `\n\n📎 引用选区: ${currentPinned.label}（${currentPinned.rowCount} 行 × ${currentPinned.colCount} 列）`;
     }
     if (currentAttachments.length > 0) {
-      displayContent += `\n\n[附件: ${currentAttachments.map((f) => f.name).join(", ")}]`;
+      const tableAttachments = currentAttachments.filter(
+        (f) => f.type === "table",
+      );
+      const otherAttachments = currentAttachments.filter(
+        (f) => f.type !== "table",
+      );
+      if (otherAttachments.length > 0) {
+        displayContent += `\n\n[附件: ${otherAttachments.map((f) => f.name).join(", ")}]`;
+      }
+      if (tableAttachments.length > 0) {
+        displayContent += `\n\n[粘贴表格: ${tableAttachments.map((f) => f.name).join(", ")}]`;
+      }
     }
 
     const userMsg: ChatMessage = {
@@ -371,9 +471,7 @@ export default function App() {
       const streamingIdx = prev.findIndex((m) => m.isStreaming);
       if (streamingIdx === -1) return prev;
       const userMsgIdx = streamingIdx - 1;
-      return prev.filter(
-        (_, i) => i !== streamingIdx && i !== userMsgIdx,
-      );
+      return prev.filter((_, i) => i !== streamingIdx && i !== userMsgIdx);
     });
 
     setInput(savedInput);
@@ -382,6 +480,148 @@ export default function App() {
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
     });
+  };
+
+  const toBase64 = (buf: ArrayBuffer): string =>
+    btoa(new Uint8Array(buf).reduce((d, b) => d + String.fromCharCode(b), ""));
+
+  const parseHtmlTable = (html: string): string | null => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const table = doc.querySelector("table");
+    if (!table) return null;
+    const rows = table.querySelectorAll("tr");
+    if (rows.length === 0) return null;
+    const lines: string[] = [];
+    rows.forEach((tr) => {
+      const cells = tr.querySelectorAll("th, td");
+      const vals: string[] = [];
+      cells.forEach((cell) => vals.push(cell.textContent?.trim() ?? ""));
+      lines.push(vals.join("\t"));
+    });
+    return lines.join("\n");
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    const imageItem = Array.from(clipboardData.items).find((item) =>
+      item.type.startsWith("image/"),
+    );
+    if (imageItem) {
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      try {
+        const arrayBuf = await file.arrayBuffer();
+        const base64 = toBase64(arrayBuf);
+        const ext = file.type.split("/")[1] || "png";
+        const fileName = `clipboard-${Date.now()}.${ext}`;
+        const resp = await fetch("http://127.0.0.1:3001/upload-temp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ base64, fileName }),
+        });
+        const result = await resp.json();
+        if (result.ok) {
+          const previewUrl = URL.createObjectURL(file);
+          setAttachedFiles((prev) => [
+            ...prev,
+            {
+              name: fileName,
+              content: `[图片: ${fileName}]`,
+              size: file.size,
+              type: "image",
+              tempPath: result.filePath,
+              previewUrl,
+            },
+          ]);
+        }
+      } catch {
+        /* ignore upload failure */
+      }
+      return;
+    }
+
+    const htmlData = clipboardData.getData("text/html");
+    if (htmlData) {
+      const tableText = parseHtmlTable(htmlData);
+      if (tableText) {
+        e.preventDefault();
+        const rows = tableText.split("\n");
+        const cols = rows[0]?.split("\t").length ?? 0;
+        const name = `表格数据 (${rows.length}行×${cols}列)`;
+        setAttachedFiles((prev) => [
+          ...prev,
+          {
+            name,
+            content: tableText,
+            size: tableText.length,
+            type: "table",
+          },
+        ]);
+        return;
+      }
+    }
+
+    const plainText = clipboardData.getData("text/plain");
+    if (plainText) {
+      e.preventDefault();
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      setInput((prev) => prev.slice(0, start) + plainText + prev.slice(end));
+      requestAnimationFrame(() => {
+        const pos = start + plainText.length;
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = pos;
+          textareaRef.current.selectionEnd = pos;
+        }
+      });
+    }
+  };
+
+  const pasteViaProxy = async () => {
+    try {
+      const resp = await fetch("http://127.0.0.1:3001/clipboard");
+      const data = await resp.json();
+      if (!data.ok) return;
+
+      if (data.type === "image" && data.filePath) {
+        const fileName = data.fileName || `clipboard-${Date.now()}.png`;
+        setAttachedFiles((prev) => [
+          ...prev,
+          {
+            name: fileName,
+            content: `[图片: ${fileName}]`,
+            size: 0,
+            type: "image" as const,
+            tempPath: data.filePath,
+          },
+        ]);
+        return;
+      }
+
+      if (data.text) {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        const pasteText = data.text;
+        setInput((prev) => prev.slice(0, start) + pasteText + prev.slice(end));
+        requestAnimationFrame(() => {
+          const pos = start + pasteText.length;
+          if (textareaRef.current) {
+            textareaRef.current.selectionStart = pos;
+            textareaRef.current.selectionEnd = pos;
+          }
+        });
+      }
+    } catch {
+      /* proxy unreachable */
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -395,28 +635,7 @@ export default function App() {
 
     if (e.key === "v") {
       e.preventDefault();
-      const ta = textareaRef.current;
-      if (!ta) return;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-
-      fetch("http://127.0.0.1:3001/clipboard")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.ok && data.text) {
-            setInput(
-              (prev) => prev.slice(0, start) + data.text + prev.slice(end),
-            );
-            requestAnimationFrame(() => {
-              const pos = start + data.text.length;
-              if (textareaRef.current) {
-                textareaRef.current.selectionStart = pos;
-                textareaRef.current.selectionEnd = pos;
-              }
-            });
-          }
-        })
-        .catch(() => {});
+      pasteViaProxy();
       return;
     }
 
@@ -470,11 +689,19 @@ export default function App() {
         <div className={styles.headerActions}>
           <button
             className={styles.headerBtn}
+            onClick={() => setHistoryOpen(true)}
+            title="历史记录"
+          >
+            <HistoryIcon />
+          </button>
+          <button
+            className={styles.headerBtn}
             onClick={() => {
               if (abortRef.current) {
                 abortRef.current.abort();
                 abortRef.current = null;
               }
+              setSessionId(nanoid());
               setMessages([WELCOME_MESSAGE]);
               setLoading(false);
               setApplyingMsgId(null);
@@ -484,9 +711,6 @@ export default function App() {
             title="新对话"
           >
             <NewChatIcon />
-          </button>
-          <button className={styles.headerBtn} title="更多">
-            <MoreIcon />
           </button>
         </div>
       </header>
@@ -527,6 +751,7 @@ export default function App() {
             message={msg}
             onCodeExecuted={handleCodeExecuted}
             onApplyCode={handleApplyCode}
+            onRetryFix={handleRetryFix}
             isApplying={applyingMsgId === msg.id}
           />
         ))}
@@ -535,51 +760,6 @@ export default function App() {
 
       {/* 输入区 */}
       <div className={styles.inputArea}>
-        {/* 已引用选区标签 */}
-        {pinnedSelection && (
-          <div className={styles.attachedBar}>
-            <span className={styles.pinnedTag}>
-              <TableIcon />
-              <span className={styles.attachedName}>
-                {pinnedSelection.label}（{pinnedSelection.rowCount}×
-                {pinnedSelection.colCount}）
-              </span>
-              <button
-                className={styles.attachedRemove}
-                onClick={() => setPinnedSelection(null)}
-              >
-                ×
-              </button>
-            </span>
-          </div>
-        )}
-
-        {/* 已附件文件标签 */}
-        {attachedFiles.length > 0 && (
-          <div className={styles.attachedBar}>
-            {attachedFiles.map((f) => (
-              <span key={f.name} className={styles.attachedTag}>
-                {f.type === "image" && f.previewUrl ? (
-                  <img
-                    src={f.previewUrl}
-                    alt={f.name}
-                    className={styles.attachedThumb}
-                  />
-                ) : (
-                  <span className={styles.attachedIcon}>📎</span>
-                )}
-                <span className={styles.attachedName}>{f.name}</span>
-                <button
-                  className={styles.attachedRemove}
-                  onClick={() => handleRemoveFile(f.name)}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
         {/* 智能快捷卡片 - 水平滚动行 */}
         <QuickActionCards
           hasSelection={!!wpsCtx?.selection}
@@ -594,16 +774,70 @@ export default function App() {
             onToggleWebSearch={() => setWebSearchEnabled((v) => !v)}
             disabled={loading}
           />
-          <textarea
-            ref={textareaRef}
-            className={styles.textarea}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="发个指令...（Enter 发送，Shift+Enter 换行）"
-            rows={2}
-            disabled={loading}
-          />
+          <div className={styles.inputFlow}>
+            {/* 选区标签 - inline */}
+            {pinnedSelection && (
+              <span className={styles.inlineChip}>
+                <TableIcon />
+                <span className={styles.chipLabel}>
+                  {pinnedSelection.label}（{pinnedSelection.rowCount}×
+                  {pinnedSelection.colCount}）
+                </span>
+                <button
+                  className={styles.chipRemove}
+                  onClick={() => setPinnedSelection(null)}
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            {/* 附件标签 - inline */}
+            {attachedFiles.map((f) => (
+              <span
+                key={f.name}
+                className={`${styles.inlineChip} ${f.type === "table" ? styles.chipTable : ""} ${f.type === "image" ? styles.chipImage : ""}`}
+              >
+                {f.type === "image" ? (
+                  f.previewUrl ? (
+                    <img
+                      src={f.previewUrl}
+                      alt={f.name}
+                      className={styles.chipThumb}
+                    />
+                  ) : (
+                    <ImageIcon />
+                  )
+                ) : f.type === "table" ? (
+                  <TableIcon />
+                ) : (
+                  <span className={styles.chipFileIcon}>📎</span>
+                )}
+                <span className={styles.chipLabel}>{f.name}</span>
+                <button
+                  className={styles.chipRemove}
+                  onClick={() => handleRemoveFile(f.name)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {/* 文本输入 */}
+            <textarea
+              ref={textareaRef}
+              className={styles.inlineTextarea}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={
+                pinnedSelection || attachedFiles.length > 0
+                  ? "描述你想做什么..."
+                  : "发个指令...（Enter 发送，Shift+Enter 换行）"
+              }
+              rows={1}
+              disabled={loading}
+            />
+          </div>
           <ModelSelector
             value={selectedModel}
             onChange={setSelectedModel}
@@ -629,7 +863,48 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <HistoryPanel
+        visible={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        currentSessionId={sessionId}
+        onSelectSession={async (id) => {
+          const session = await loadSession(id);
+          if (!session) return;
+          if (abortRef.current) {
+            abortRef.current.abort();
+            abortRef.current = null;
+          }
+          setSessionId(session.id);
+          setMessages(
+            session.messages.length > 0
+              ? [WELCOME_MESSAGE, ...session.messages]
+              : [WELCOME_MESSAGE],
+          );
+          if (session.model) setSelectedModel(session.model);
+          setLoading(false);
+          setApplyingMsgId(null);
+        }}
+      />
     </div>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
   );
 }
 
@@ -698,12 +973,21 @@ function NewChatIcon() {
   );
 }
 
-function MoreIcon() {
+function ImageIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-      <circle cx="12" cy="5" r="1.5" />
-      <circle cx="12" cy="12" r="1.5" />
-      <circle cx="12" cy="19" r="1.5" />
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="M21 15l-5-5L5 21" />
     </svg>
   );
 }

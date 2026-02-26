@@ -85,6 +85,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 let _lastCtxJson = "";
+let _lastSelectionCtx: WpsContext | null = null;
+let _selNullCount = 0;
+const SEL_NULL_GRACE = 2;
 
 export function onSelectionChange(
   callback: (ctx: WpsContext) => void,
@@ -96,10 +99,26 @@ export function onSelectionChange(
     if (!active) return;
     try {
       const ctx = await getWpsContext();
+
+      if (!ctx.selection && _lastSelectionCtx?.selection) {
+        _selNullCount++;
+        if (_selNullCount <= SEL_NULL_GRACE) {
+          if (active) setTimeout(poll, POLL_INTERVAL);
+          return;
+        }
+      } else {
+        _selNullCount = 0;
+      }
+
+      if (ctx.selection) {
+        _lastSelectionCtx = ctx;
+      }
+
       const json = JSON.stringify({
         workbookName: ctx.workbookName,
         sheetNames: ctx.sheetNames,
         selAddr: ctx.selection?.address,
+        selSheet: ctx.selection?.sheetName,
         selRows: ctx.selection?.rowCount,
         selCols: ctx.selection?.colCount,
       });

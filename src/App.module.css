@@ -130,17 +130,7 @@
   flex-shrink: 0;
 }
 
-.pinnedTag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  background: #1a2a20;
-  border: 1px solid #00d4aa40;
-  border-radius: 6px;
-  font-size: 11px;
-  color: #00d4aa;
-}
+/* (old pinnedTag removed — now uses inlineChip) */
 
 /* API Key 警告 */
 .warning {
@@ -195,8 +185,28 @@
   padding: 8px 10px 8px 14px;
 }
 
-.textarea {
+.inputFlow {
   flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.inputFlow::-webkit-scrollbar {
+  width: 2px;
+}
+.inputFlow::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 2px;
+}
+
+.inlineTextarea {
+  flex: 1 1 80px;
+  min-width: 80px;
   background: transparent;
   border: none;
   outline: none;
@@ -206,15 +216,82 @@
   color: #fff;
   line-height: 1.5;
   min-height: 20px;
-  max-height: 100px;
+  max-height: 80px;
+  padding: 2px 0;
 }
 
-.textarea::placeholder {
-  color: #777;
+.inlineTextarea::placeholder {
+  color: #666;
 }
 
-.textarea:disabled {
+.inlineTextarea:disabled {
   opacity: 0.6;
+}
+
+/* Inline chips (inside input box) */
+.inlineChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px 2px 5px;
+  background: #1a2a20;
+  border: 1px solid #00d4aa40;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #00d4aa;
+  white-space: nowrap;
+  max-width: 180px;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+
+.chipTable {
+  background: #1a2a20;
+  border-color: #00d4aa40;
+  color: #00d4aa;
+}
+
+.chipImage {
+  background: #1a1a2e;
+  border-color: #6366f140;
+  color: #a0a0f0;
+}
+
+.chipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.chipRemove {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 1px;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.chipRemove:hover {
+  opacity: 1;
+}
+
+.chipThumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.chipFileIcon {
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
 .sendBtn {
@@ -256,54 +333,4 @@
   50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
 }
 
-/* 已附件文件标签 */
-.attachedBar {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.attachedTag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  background: #2d2d2d;
-  border-radius: 6px;
-  font-size: 11px;
-  color: #ccc;
-}
-
-.attachedRemove {
-  background: none;
-  border: none;
-  color: #777;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 2px;
-  transition: color 0.15s;
-}
-
-.attachedRemove:hover {
-  color: #D97757;
-}
-
-.attachedThumb {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.attachedIcon {
-  flex-shrink: 0;
-}
-
-.attachedName {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* (old attachedBar removed — chips are now inline in inputFlow) */

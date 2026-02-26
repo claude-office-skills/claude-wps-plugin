@@ -28,6 +28,20 @@ context:
 6. 列宽用 ws.Range("A:A").ColumnWidth = N
 7. 行高用 ws.Range("1:1").RowHeight = N
 
+### ⚠️ 始终使用 ActiveSheet（禁止硬编码 sheet 名称）
+
+操作当前表时，必须用 `Application.ActiveSheet`，绝对不要用 `wb.Sheets.Item("表名")` 硬编码 sheet 名称。因为用户可能已经重命名了 sheet，硬编码名称会导致代码操作错误的 sheet 或报错。
+
+```javascript
+// ✅ 正确
+var ws = Application.ActiveSheet;
+
+// ❌ 错误：sheet 可能已被重命名
+// var ws = wb.Sheets.Item("库存管理系统");
+```
+
+仅在明确需要跨 sheet 操作（如从源表读数据写到新表）时，才通过 WPS 上下文提供的 sheetName 引用特定 sheet。
+
 ### 不要覆盖用户已有数据
 
 - 数据分析/趋势分析/建模任务：必须新建工作表，不得在现有工作表上执行 Clear() 或覆盖数据

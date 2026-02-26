@@ -78,9 +78,15 @@ export interface AttachmentFile {
   name: string;
   content: string;
   size: number;
-  type?: "text" | "image";
+  type?: "text" | "image" | "table";
   tempPath?: string;
   previewUrl?: string;
+}
+
+export interface FixErrorRequest {
+  code: string;
+  error: string;
+  language: string;
 }
 
 export interface QuickAction {

@@ -1,12 +1,15 @@
 {
 	"name": "claude-wps-plugin",
 	"private": true,
-	"version": "1.0.0",
+	"version": "1.3.0",
 	"type": "module",
 	"addonType": "et",
 	"scripts": {
 		"dev": "vite",
+		"proxy": "node proxy-server.js",
+		"start": "node proxy-server.js & vite",
 		"build": "tsc -b && vite build",
+		"build:dist": "node build-dist.mjs",
 		"lint": "eslint .",
 		"preview": "vite preview"
 	},

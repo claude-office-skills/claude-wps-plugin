@@ -10,10 +10,16 @@ const COLLAPSE_THRESHOLD = 12;
 interface Props {
   block: CodeBlockType;
   onExecuted: (blockId: string, result: string, error?: string) => void;
+  onRetryFix?: (code: string, error: string, language: string) => void;
   isStreaming?: boolean;
 }
 
-export default function CodeBlock({ block, onExecuted, isStreaming }: Props) {
+export default function CodeBlock({
+  block,
+  onExecuted,
+  onRetryFix,
+  isStreaming,
+}: Props) {
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
   const lineCount = block.code.split("\n").length;
@@ -176,6 +182,17 @@ export default function CodeBlock({ block, onExecuted, isStreaming }: Props) {
         <div className={`${styles.result} ${styles.resultError}`}>
           <span className={styles.errorLabel}>错误</span>
           <pre className={styles.resultText}>{block.error}</pre>
+          {onRetryFix && (
+            <button
+              className={styles.fixBtn}
+              onClick={() =>
+                onRetryFix(block.code, block.error!, block.language)
+              }
+              title="将错误发送给 Claude 修复"
+            >
+              <FixIcon /> 修复错误
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -184,7 +201,14 @@ export default function CodeBlock({ block, onExecuted, isStreaming }: Props) {
 
 function CopyIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <rect x="9" y="9" width="13" height="13" rx="2" />
       <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
     </svg>
@@ -193,8 +217,33 @@ function CopyIcon() {
 
 function SpinnerIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spin">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className="spin"
+    >
       <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
+function FixIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
     </svg>
   );
 }

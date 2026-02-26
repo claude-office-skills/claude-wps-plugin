@@ -11,11 +11,17 @@ const PROXY_BASE = "http://127.0.0.1:3001";
 /** 构建 Excel 上下文字符串 */
 function buildContextString(wpsCtx: WpsContext): string {
   const { selection, workbookName, sheetNames, usedRange } = wpsCtx;
-  let ctx = `工作簿: ${workbookName}\n工作表: ${sheetNames.join(", ")}\n`;
+  const activeSheet = selection?.sheetName || "";
+
+  let ctx = `工作簿: ${workbookName}\n`;
+  ctx += `所有工作表: ${sheetNames.join(", ")}\n`;
+  if (activeSheet) {
+    ctx += `\n⚠️ 当前活动工作表: 「${activeSheet}」— 请务必基于此表进行操作，忽略历史对话中提到的其他工作表。\n`;
+  }
 
   if (usedRange) {
-    ctx += `\n[完整工作表数据] ${usedRange.address}，${usedRange.rowCount} 行 × ${usedRange.colCount} 列\n`;
-    if (usedRange.sampleValues.length > 0) {
+    ctx += `\n[当前表已用范围] ${usedRange.address}，${usedRange.rowCount} 行 × ${usedRange.colCount} 列\n`;
+    if (usedRange.sampleValues && usedRange.sampleValues.length > 0) {
       usedRange.sampleValues.forEach((row, i) => {
         ctx += `  ${i + 1}: ${row.map((v) => JSON.stringify(v)).join(" | ")}\n`;
       });
@@ -34,7 +40,7 @@ function buildContextString(wpsCtx: WpsContext): string {
       hasMoreRows,
     } = selection;
     ctx += `\n[当前选区] ${sheetName}!${address}，${rowCount} 行 × ${colCount} 列\n`;
-    ctx += `⚠️ 用户选定的操作范围是 ${sheetName}!${address}，生成的代码应仅操作此范围内的数据，不要超出选区范围（除非用户明确要求扩展）。\n`;
+    ctx += `⚠️ 用户选定的操作范围是「${sheetName}」表的 ${address}。生成的代码必须操作此表此范围，不要操作其他工作表。\n`;
     if (sampleValues.length > 0) {
       sampleValues.forEach((row, i) => {
         ctx += `  ${i + 1}: ${row.map((v) => JSON.stringify(v)).join(" | ")}\n`;
@@ -92,6 +98,30 @@ export async function sendMessage(
   ];
 
   const context = buildContextString(wpsCtx);
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "fc5e63",
+    },
+    body: JSON.stringify({
+      sessionId: "fc5e63",
+      location: "claudeClient.ts:sendMessage",
+      message: "Built context string",
+      data: {
+        contextPreview: context.substring(0, 600),
+        selSheet: wpsCtx.selection?.sheetName,
+        selAddr: wpsCtx.selection?.address,
+        selSampleCount: wpsCtx.selection?.sampleValues?.length || 0,
+        usedRangeAddr: wpsCtx.usedRange?.address,
+        historyLen: history.length,
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H1-H5",
+    }),
+  }).catch(() => {});
+  // #endregion
   let fullText = "";
 
   const payload: Record<string, unknown> = { messages, context };

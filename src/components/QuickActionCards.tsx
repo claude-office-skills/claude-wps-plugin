@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { QuickAction } from "../types";
 import styles from "./QuickActionCards.module.css";
 
 const PROXY_BASE = "http://127.0.0.1:3001";
+const DEBOUNCE_MS = 1500;
 
 interface CommandDef {
   id: string;
@@ -51,6 +52,25 @@ export default function QuickActionCards({
     useState<QuickAction[]>(FALLBACK_GENERAL);
   const [selectionCmds, setSelectionCmds] =
     useState<QuickAction[]>(FALLBACK_SELECTION);
+  const [stableHasSelection, setStableHasSelection] = useState(hasSelection);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (hasSelection === stableHasSelection) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+    timerRef.current = setTimeout(() => {
+      setStableHasSelection(hasSelection);
+      timerRef.current = null;
+    }, DEBOUNCE_MS);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [hasSelection, stableHasSelection]);
 
   useEffect(() => {
     fetch(`${PROXY_BASE}/commands`)
@@ -68,7 +88,7 @@ export default function QuickActionCards({
       .catch(() => {});
   }, []);
 
-  const actions = hasSelection ? selectionCmds : generalCmds;
+  const actions = stableHasSelection ? selectionCmds : generalCmds;
 
   return (
     <div className={styles.grid}>

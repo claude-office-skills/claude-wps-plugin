@@ -271,7 +271,24 @@ try { chart.HasLegend = true; chart.Legend.Position = -4107; } catch(e) {}
 `;
 
 function buildSystemPrompt(skills, todayStr, userMessage) {
-  let prompt = `你是 Claude，嵌入在 WPS Office Excel 中的 AI 数据处理助手。你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天的日期是 ${todayStr}。当用户询问"最近/近期"数据时，以今天为基准。\n\n`;
+  let prompt = `你是 Claude，嵌入在 WPS Office Excel 中的 AI 数据处理助手。你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天的日期是 ${todayStr}。当用户询问"最近/近期"数据时，以今天为基准。
+
+## ⚠️ 上下文优先级（最重要）
+每次请求都会附带「当前 Excel 上下文」，其中包含当前活动工作表名称和选区信息。
+- 你必须**只关注当前活动工作表**，忽略对话历史中提到的其他工作表
+- 如果用户切换了工作表，以最新上下文中的表名为准
+- 生成的代码必须操作当前活动工作表，不要引用历史对话中的旧表名
+
+## ⚠️ 代码长度限制（必须遵守）
+你生成的 JavaScript 代码总长度必须控制在 3000 字符以内。超长代码会被截断导致语法错误！
+- 生成超过 20 行数据时，必须用「小数组 + for 循环 + Math.random()」随机组合生成
+- 绝对禁止硬编码大量数据行（如手动写 100+ 行数组）
+- 使用 ws.Range().Value2 批量写入（二维数组一次写多行），避免逐行写入
+
+## ⚠️ 始终使用 ActiveSheet（必须遵守）
+操作当前表时，必须用 var ws = Application.ActiveSheet; 绝对不要用 wb.Sheets.Item("表名") 硬编码 sheet 名称（用户可能已重命名 sheet，会导致操作错误的表或报错）。
+
+\n`;
 
   for (const skill of skills) {
     prompt += skill.body + "\n\n";
@@ -343,16 +360,42 @@ if (existsSync(wpsAddonPath)) {
   app.use("/wps-addon", express.static(wpsAddonPath));
 }
 
-// ── 系统剪贴板读取（macOS pbpaste）───────────────────────────
+// ── 系统剪贴板读取（macOS）─────────────────────────────────────
 app.get("/clipboard", (req, res) => {
   try {
+    let hasImage = false;
+    try {
+      const types = execSync(
+        `osascript -e 'clipboard info' 2>/dev/null | head -5`,
+        { encoding: "utf-8", timeout: 2000 },
+      );
+      hasImage = /TIFF|PNG|JPEG|picture/i.test(types);
+    } catch {}
+
+    if (hasImage) {
+      try {
+        const imgName = `clipboard-${Date.now()}.png`;
+        const imgPath = join(TEMP_DIR, imgName);
+        execSync(
+          `osascript -e 'set pngData to (the clipboard as «class PNGf»)' -e 'set fp to open for access POSIX file "${imgPath}" with write permission' -e 'write pngData to fp' -e 'close access fp'`,
+          { timeout: 5000 },
+        );
+        return res.json({
+          ok: true,
+          type: "image",
+          filePath: imgPath,
+          fileName: imgName,
+        });
+      } catch {}
+    }
+
     const text = execSync("pbpaste", {
       encoding: "utf-8",
       timeout: 2000,
       maxBuffer: 1024 * 1024,
       env: { ...process.env, LANG: "en_US.UTF-8" },
     });
-    res.json({ ok: true, text });
+    res.json({ ok: true, type: "text", text });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -615,6 +658,10 @@ let _wpsContext = {
 };
 
 app.post("/wps-context", (req, res) => {
+  if (!req.body.workbookName && _wpsContext.workbookName) {
+    res.json({ ok: true, skipped: true });
+    return;
+  }
   _wpsContext = { ...req.body, timestamp: Date.now() };
   res.json({ ok: true });
 });

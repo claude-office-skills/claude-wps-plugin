@@ -14,6 +14,7 @@ interface Props {
     error?: string,
   ) => void;
   onApplyCode?: (msgId: string) => void;
+  onRetryFix?: (code: string, error: string, language: string) => void;
   isApplying?: boolean;
 }
 
@@ -57,7 +58,9 @@ function ThinkingSection({
           <span className={styles.thinkingTimer}>{elapsed}s</span>
         </div>
         {thinkingContent && (
-          <div ref={thinkingBodyRef} className={styles.thinkingBody}>{thinkingContent}</div>
+          <div ref={thinkingBodyRef} className={styles.thinkingBody}>
+            {thinkingContent}
+          </div>
         )}
       </div>
     );
@@ -122,6 +125,7 @@ function ThinkingDoneIcon() {
 const markdownComponents = (
   message: ChatMessage,
   onCodeExecuted: Props["onCodeExecuted"],
+  onRetryFix?: Props["onRetryFix"],
   isStreaming?: boolean,
 ) => ({
   pre({ children }: { children?: ReactNode }) {
@@ -148,6 +152,7 @@ const markdownComponents = (
           onExecuted={(blockId, result, error) =>
             onCodeExecuted(message.id, blockId, result, error)
           }
+          onRetryFix={onRetryFix}
         />
       );
     }
@@ -163,6 +168,7 @@ const markdownComponents = (
         onExecuted={(blockId, result, error) =>
           onCodeExecuted(message.id, blockId, result, error)
         }
+        onRetryFix={onRetryFix}
       />
     );
   },
@@ -182,6 +188,7 @@ export default function MessageBubble({
   message,
   onCodeExecuted,
   onApplyCode,
+  onRetryFix,
   isApplying,
 }: Props) {
   const isUser = message.role === "user";
@@ -239,7 +246,12 @@ export default function MessageBubble({
           <div className={styles.assistContent}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
-              components={markdownComponents(message, onCodeExecuted, true)}
+              components={markdownComponents(
+                message,
+                onCodeExecuted,
+                onRetryFix,
+                true,
+              )}
             >
               {message.content}
             </ReactMarkdown>
@@ -252,7 +264,12 @@ export default function MessageBubble({
           <div className={styles.assistContent}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
-              components={markdownComponents(message, onCodeExecuted, false)}
+              components={markdownComponents(
+                message,
+                onCodeExecuted,
+                onRetryFix,
+                false,
+              )}
             >
               {message.content}
             </ReactMarkdown>
