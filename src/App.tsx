@@ -8,7 +8,10 @@ import AttachmentMenu from "./components/AttachmentMenu";
 import QuickActionCards from "./components/QuickActionCards";
 import HistoryPanel from "./components/HistoryPanel";
 import ThemeToggle from "./components/ThemeToggle";
+import AgentTabBar from "./components/AgentTabBar";
+import AgentListPanel from "./components/AgentListPanel";
 import { useTheme } from "./hooks/useTheme";
+import { useAgentManager } from "./hooks/useAgentManager";
 import { sendMessage, extractCodeBlocks, checkProxy } from "./api/claudeClient";
 import {
   getWpsContext,
@@ -32,23 +35,32 @@ import type {
 } from "./types";
 import styles from "./App.module.css";
 
-const WELCOME_MESSAGE: ChatMessage = {
-  id: "welcome",
-  role: "assistant",
-  content:
-    "你好！我是 Claude，你的 WPS Excel AI 助手。\n\n我可以帮你：\n- **清洗数据**（去重、删除空白、统一格式）\n- **转换格式**（日期、数字、文本类型）\n- **批量操作**（填充、替换、计算）\n\n请先**选中一个区域**，然后告诉我你想做什么。",
-  timestamp: Date.now(),
-};
-
 export default function App() {
   const { theme, cycleTheme } = useTheme();
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
+  const agentMgr = useAgentManager();
+  const {
+    agents,
+    activeAgentId,
+    activeAgent,
+    createNewAgent,
+    switchAgent,
+    removeAgent,
+    updateActiveMessages,
+    setActiveStatus,
+    setActiveName,
+    setActiveMode,
+    setActiveModel,
+  } = agentMgr;
+
+  const messages = activeAgent.messages;
+  const currentMode = activeAgent.mode;
+  const selectedModel = activeAgent.model;
+
   const [input, setInput] = useState("");
   const [wpsCtx, setWpsCtx] = useState<WpsContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [proxyMissing, setProxyMissing] = useState(false);
   const [applyingMsgId, setApplyingMsgId] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-6");
   const [attachedFiles, setAttachedFiles] = useState<AttachmentFile[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [pinnedSelection, setPinnedSelection] = useState<{
@@ -59,14 +71,11 @@ export default function App() {
     colCount: number;
   } | null>(null);
 
-  const [sessionId, setSessionId] = useState<string>(nanoid());
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [agentListOpen, setAgentListOpen] = useState(false);
 
   const [inputBoxHeight, setInputBoxHeight] = useState(120);
-  const [currentMode, setCurrentMode] = useState<InteractionMode>(
-    () =>
-      (localStorage.getItem("wps-claude-mode") as InteractionMode) || "agent",
-  );
+  const showTabBar = agents.length > 1;
 
   const abortRef = useRef<AbortController | null>(null);
   const lastSentInputRef = useRef<string>("");
@@ -161,9 +170,14 @@ export default function App() {
         const session = await loadSession(latest.id);
         if (!session || !session.messages || session.messages.length === 0)
           return;
-        setSessionId(session.id);
-        setMessages([WELCOME_MESSAGE, ...session.messages]);
-        if (session.model) setSelectedModel(session.model);
+        agentMgr.loadAgentsFromSessions([
+          {
+            id: session.id,
+            title: session.title || "",
+            messages: session.messages,
+            model: session.model,
+          },
+        ]);
       } catch {
         // ignore
       }
@@ -171,9 +185,9 @@ export default function App() {
     restoreLastSession();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 自动保存：消息变化后 1 秒去抖保存
+  // 自动保存：消息变化后 1 秒去抖保存 + 自动命名
   useEffect(() => {
-    const realMessages = messages.filter((m) => m.id !== "welcome");
+    const realMessages = messages.filter((m) => !m.id.startsWith("welcome"));
     if (realMessages.length === 0) return;
     const hasStreaming = realMessages.some((m) => m.isStreaming);
     if (hasStreaming) return;
@@ -181,13 +195,16 @@ export default function App() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const title = generateTitle(realMessages);
-      saveSession(sessionId, realMessages, { title, model: selectedModel });
+      saveSession(activeAgentId, realMessages, { title, model: selectedModel });
+      if (!activeAgent.name && title) {
+        setActiveName(title);
+      }
     }, 1000);
 
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [messages, sessionId, selectedModel]);
+  }, [messages, activeAgentId, selectedModel, activeAgent.name, setActiveName]);
 
   // 全局 Cmd+C：WPS WebView 中原生 copy 不生效，手动写入剪贴板
   useEffect(() => {
@@ -239,7 +256,7 @@ export default function App() {
       error?: string,
       diff?: import("./types").DiffResult | null,
     ) => {
-      setMessages((prev) =>
+      updateActiveMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== msgId) return msg;
           const updatedBlocks = msg.codeBlocks?.map((b) =>
@@ -251,48 +268,53 @@ export default function App() {
         }),
       );
     },
-    [],
+    [updateActiveMessages],
   );
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
-  const handleApplyCode = useCallback(async (msgId: string) => {
-    const msg = messagesRef.current.find((m) => m.id === msgId);
-    const blocks = msg?.codeBlocks?.filter((b) => !b.executed);
-    if (!blocks?.length) return;
+  const handleApplyCode = useCallback(
+    async (msgId: string) => {
+      const msg = messagesRef.current.find((m) => m.id === msgId);
+      const blocks = msg?.codeBlocks?.filter((b) => !b.executed);
+      if (!blocks?.length) return;
 
-    setApplyingMsgId(msgId);
+      setApplyingMsgId(msgId);
 
-    for (const block of blocks) {
-      try {
-        const { result, diff } = await executeCode(block.code);
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== msgId) return m;
-            const updated = m.codeBlocks?.map((b) =>
-              b.id === block.id ? { ...b, executed: true, result, diff } : b,
-            );
-            return { ...m, codeBlocks: updated };
-          }),
-        );
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== msgId) return m;
-            const updated = m.codeBlocks?.map((b) =>
-              b.id === block.id ? { ...b, executed: true, error: errorMsg } : b,
-            );
-            return { ...m, codeBlocks: updated };
-          }),
-        );
-        break;
+      for (const block of blocks) {
+        try {
+          const { result, diff } = await executeCode(block.code);
+          updateActiveMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== msgId) return m;
+              const updated = m.codeBlocks?.map((b) =>
+                b.id === block.id ? { ...b, executed: true, result, diff } : b,
+              );
+              return { ...m, codeBlocks: updated };
+            }),
+          );
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          updateActiveMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== msgId) return m;
+              const updated = m.codeBlocks?.map((b) =>
+                b.id === block.id
+                  ? { ...b, executed: true, error: errorMsg }
+                  : b,
+              );
+              return { ...m, codeBlocks: updated };
+            }),
+          );
+          break;
+        }
       }
-    }
 
-    setApplyingMsgId(null);
-  }, []);
+      setApplyingMsgId(null);
+    },
+    [updateActiveMessages],
+  );
 
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
@@ -339,10 +361,12 @@ ${code}
     textareaRef.current?.focus();
   }, [wpsCtx]);
 
-  const handleModeChange = useCallback((mode: InteractionMode) => {
-    setCurrentMode(mode);
-    localStorage.setItem("wps-claude-mode", mode);
-  }, []);
+  const handleModeChange = useCallback(
+    (mode: InteractionMode) => {
+      setActiveMode(mode);
+    },
+    [setActiveMode],
+  );
 
   const handleFileAttach = useCallback((file: AttachmentFile) => {
     setAttachedFiles((prev) => [...prev, file]);
@@ -388,18 +412,16 @@ ${code}
       abortRef.current.abort();
       abortRef.current = null;
     }
-    setSessionId(nanoid());
-    setMessages([WELCOME_MESSAGE]);
+    createNewAgent();
     setLoading(false);
     setApplyingMsgId(null);
     setPinnedSelection(null);
     setAttachedFiles([]);
-  }, []);
+  }, [createNewAgent]);
 
   const handleSwitchToAgent = useCallback(() => {
-    setCurrentMode("agent");
-    localStorage.setItem("wps-claude-mode", "agent");
-  }, []);
+    setActiveMode("agent");
+  }, [setActiveMode]);
 
   const handleSend = async (text?: string) => {
     const userText = (text ?? input).trim();
@@ -447,7 +469,8 @@ ${code}
       isStreaming: true,
     };
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    updateActiveMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setActiveStatus("running");
     setLoading(true);
 
     const controller = new AbortController();
@@ -463,12 +486,12 @@ ${code}
     try {
       await sendMessage(
         userText,
-        messages.filter((m) => m.id !== "welcome"),
+        messages.filter((m) => !m.id.startsWith("welcome")),
         wpsCtx ?? { workbookName: "", sheetNames: [], selection: null },
         {
           onThinking: (text) => {
             thinkingText += text;
-            setMessages((prev) =>
+            updateActiveMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? { ...m, thinkingContent: thinkingText }
@@ -484,7 +507,7 @@ ${code}
               updates.thinkingMs = Date.now() - thinkingStart;
               setProxyMissing(false);
             }
-            setMessages((prev) =>
+            updateActiveMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId ? { ...m, ...updates } : m,
               ),
@@ -502,7 +525,7 @@ ${code}
                 /切换.{0,4}Agent|switch.{0,6}agent|需要执行|需要操作|建议.{0,4}Agent/i;
               const suggestSwitch = hadCode || ACTION_HINTS.test(text);
 
-              setMessages((prev) =>
+              updateActiveMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
                     ? {
@@ -515,6 +538,7 @@ ${code}
                     : m,
                 ),
               );
+              setActiveStatus("done");
               setLoading(false);
               return;
             }
@@ -526,14 +550,13 @@ ${code}
               code: b.code,
             }));
 
-            setMessages((prev) =>
+            updateActiveMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? { ...m, content: text, isStreaming: false, codeBlocks }
                   : m,
               ),
             );
-            setLoading(false);
 
             const shouldAutoExecute = modeSnapshot === "agent";
 
@@ -543,7 +566,7 @@ ${code}
                 const block = codeBlocks[_bi];
                 try {
                   const { result, diff } = await executeCode(block.code);
-                  setMessages((prev) =>
+                  updateActiveMessages((prev) =>
                     prev.map((m) => {
                       if (m.id !== assistantMsgId) return m;
                       const updated = m.codeBlocks?.map((b) =>
@@ -557,7 +580,7 @@ ${code}
                 } catch (err) {
                   const errorMsg =
                     err instanceof Error ? err.message : String(err);
-                  setMessages((prev) =>
+                  updateActiveMessages((prev) =>
                     prev.map((m) => {
                       if (m.id !== assistantMsgId) return m;
                       const updated = m.codeBlocks?.map((b) =>
@@ -568,18 +591,21 @@ ${code}
                       return { ...m, codeBlocks: updated };
                     }),
                   );
+                  setActiveStatus("failed", errorMsg);
                   break;
                 }
               }
               setApplyingMsgId(null);
             }
+            setActiveStatus("done");
+            setLoading(false);
           },
           onError: (err) => {
             const isProxyError =
               err.message.includes("fetch") ||
               err.message.includes("Failed") ||
               err.message.includes("代理");
-            setMessages((prev) =>
+            updateActiveMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? {
@@ -593,6 +619,7 @@ ${code}
                   : m,
               ),
             );
+            setActiveStatus("failed", err.message);
             setProxyMissing(true);
             setLoading(false);
           },
@@ -607,12 +634,11 @@ ${code}
         },
       );
     } catch (unexpectedErr) {
-      // 兜底捕获：防止 sendMessage 内部未处理的异常导致 loading 状态永久卡死
       const errMsg =
         unexpectedErr instanceof Error
           ? unexpectedErr.message
           : String(unexpectedErr);
-      setMessages((prev) =>
+      updateActiveMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
             ? {
@@ -624,6 +650,7 @@ ${code}
             : m,
         ),
       );
+      setActiveStatus("failed", errMsg);
       setLoading(false);
       setApplyingMsgId(null);
     }
@@ -643,13 +670,14 @@ ${code}
     const savedInput = lastSentInputRef.current;
     lastSentInputRef.current = "";
 
-    setMessages((prev) => {
+    updateActiveMessages((prev) => {
       const streamingIdx = prev.findIndex((m) => m.isStreaming);
       if (streamingIdx === -1) return prev;
       const userMsgIdx = streamingIdx - 1;
       return prev.filter((_, i) => i !== streamingIdx && i !== userMsgIdx);
     });
 
+    setActiveStatus("idle");
     setInput(savedInput);
     setLoading(false);
 
@@ -896,7 +924,7 @@ ${code}
             <Claude.Color size={20} />
           </div>
           <div className={styles.logoName}>Claude for Excel</div>
-          <span className={styles.betaBadge}>Beta</span>
+          <span className={styles.betaBadge}>v2</span>
         </div>
         <div className={styles.headerActions}>
           <ThemeToggle theme={theme} onCycle={cycleTheme} />
@@ -910,12 +938,22 @@ ${code}
           <button
             className={styles.headerBtn}
             onClick={handleNewChat}
-            title="新对话"
+            title="新 Agent"
           >
             <NewChatIcon />
           </button>
         </div>
       </header>
+
+      {/* Multi-Agent Tab 栏 */}
+      <AgentTabBar
+        agents={agents}
+        activeAgentId={activeAgentId}
+        onSwitch={switchAgent}
+        onNew={handleNewChat}
+        onOpenList={() => setAgentListOpen(true)}
+        visible={showTabBar}
+      />
 
       {/* 选区上下文条 */}
       {wpsCtx?.selection && (
@@ -1063,7 +1101,7 @@ ${code}
             <div className={styles.toolbarRight}>
               <ModelSelector
                 value={selectedModel}
-                onChange={setSelectedModel}
+                onChange={setActiveModel}
                 disabled={loading}
               />
               {loading ? (
@@ -1089,10 +1127,25 @@ ${code}
         </div>
       </div>
 
+      {/* Agents 列表面板 */}
+      {agentListOpen && (
+        <AgentListPanel
+          agents={agents}
+          activeAgentId={activeAgentId}
+          onSwitch={switchAgent}
+          onNew={() => {
+            handleNewChat();
+            setAgentListOpen(false);
+          }}
+          onClose={() => setAgentListOpen(false)}
+          onRemove={removeAgent}
+        />
+      )}
+
       <HistoryPanel
         visible={historyOpen}
         onClose={handleCloseHistory}
-        currentSessionId={sessionId}
+        currentSessionId={activeAgentId}
         onSelectSession={async (id) => {
           const session = await loadSession(id);
           if (!session) return;
@@ -1100,13 +1153,14 @@ ${code}
             abortRef.current.abort();
             abortRef.current = null;
           }
-          setSessionId(session.id);
-          setMessages(
-            session.messages.length > 0
-              ? [WELCOME_MESSAGE, ...session.messages]
-              : [WELCOME_MESSAGE],
-          );
-          if (session.model) setSelectedModel(session.model);
+          agentMgr.loadAgentsFromSessions([
+            {
+              id: session.id,
+              title: session.title || "",
+              messages: session.messages,
+              model: session.model,
+            },
+          ]);
           setLoading(false);
           setApplyingMsgId(null);
         }}
