@@ -776,7 +776,7 @@ let _codeIdCounter = 0;
 let _codeChunkMap = {};
 
 app.post("/execute-code", (req, res) => {
-  const { code } = req.body;
+  const { code, agentId } = req.body;
   if (!code) return res.status(400).json({ error: "code 不能为空" });
 
   if (_codeQueue.length >= CODE_QUEUE_MAX) {
@@ -786,7 +786,12 @@ app.post("/execute-code", (req, res) => {
   const parentId = `exec-${++_codeIdCounter}-${Date.now()}`;
 
   const cleanCode = code.replace(/\/\/\s*---ROW---/g, "");
-  _codeQueue.push({ id: parentId, code: cleanCode, submittedAt: Date.now() });
+  _codeQueue.push({
+    id: parentId,
+    code: cleanCode,
+    agentId: agentId || null,
+    submittedAt: Date.now(),
+  });
   res.json({ ok: true, id: parentId });
 });
 
@@ -882,11 +887,61 @@ const ALLOWED_MODELS = new Set([
   "claude-haiku-4-5",
 ]);
 
-// ── 聊天速率限制（本地单用户场景：5 秒内最多 3 次并发）──────
+// ── Agent 语义命名：用 AI 从对话中提取简短名称 ──────
+app.post("/generate-agent-name", async (req, res) => {
+  const { messages } = req.body;
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    return res.json({ name: "" });
+  }
+
+  const userMessages = messages
+    .filter((m) => m.role === "user")
+    .slice(0, 3)
+    .map((m) => m.content.slice(0, 200));
+
+  if (userMessages.length === 0) return res.json({ name: "" });
+
+  const combined = userMessages.join(" | ");
+  const keywords = combined.replace(/[📎\[\]（）()]/g, "").trim();
+
+  if (keywords.length <= 6) {
+    return res.json({ name: keywords });
+  }
+
+  const NAMING_PATTERNS = [
+    { re: /(?:清洗|清理|整理)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:排序|sort)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:图表|chart|可视化|柱状|折线|饼图)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:去重|duplicate|重复)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:筛选|过滤|filter)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:公式|formula|计算|汇总|求和|统计)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:格式|format|颜色|字体|样式)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:导入|导出|import|export)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:模板|template)[^\s,，。]*/i, prefix: "" },
+    { re: /(?:分析|analysis|预测)[^\s,，。]*/i, prefix: "" },
+  ];
+
+  for (const { re } of NAMING_PATTERNS) {
+    const match = combined.match(re);
+    if (match) {
+      const name = match[0].slice(0, 10);
+      return res.json({ name });
+    }
+  }
+
+  const shortName = keywords
+    .replace(/请|帮我|帮忙|我想|我要|可以|能不能|一下|吗|啊|呢/g, "")
+    .trim()
+    .slice(0, 10);
+
+  res.json({ name: shortName || "新任务" });
+});
+
+// ── 聊天速率限制（Multi-Agent 并行支持）──────
 let _activeChats = 0;
-const CHAT_CONCURRENCY_MAX = 3;
+const CHAT_CONCURRENCY_MAX = 6;
 let _lastChatTime = 0;
-const CHAT_MIN_INTERVAL_MS = 500;
+const CHAT_MIN_INTERVAL_MS = 300;
 
 // ── 聊天接口（SSE 流式响应）──────────────────────────────────
 app.post("/chat", (req, res) => {

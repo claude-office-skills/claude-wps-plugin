@@ -25,6 +25,7 @@ import {
   loadSession,
   listSessions,
   generateTitle,
+  generateAgentName,
 } from "./api/sessionStore";
 import type {
   ChatMessage,
@@ -193,12 +194,14 @@ export default function App() {
     if (hasStreaming) return;
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      const title = generateTitle(realMessages);
-      saveSession(activeAgentId, realMessages, { title, model: selectedModel });
-      if (!activeAgent.name && title) {
-        setActiveName(title);
+    saveTimerRef.current = setTimeout(async () => {
+      let title = activeAgent.name;
+      if (!title) {
+        title = await generateAgentName(realMessages);
+        if (title) setActiveName(title);
       }
+      if (!title) title = generateTitle(realMessages);
+      saveSession(activeAgentId, realMessages, { title, model: selectedModel });
     }, 1000);
 
     return () => {

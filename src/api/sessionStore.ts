@@ -61,6 +61,24 @@ export function generateTitle(messages: ChatMessage[]): string {
   return text.length > 30 ? text.slice(0, 30) + "…" : text;
 }
 
+export async function generateAgentName(
+  messages: ChatMessage[],
+): Promise<string> {
+  try {
+    const res = await fetch(`${PROXY_URL}/generate-agent-name`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return data.name || "";
+  } catch {
+    return generateTitle(messages);
+  }
+}
+
 export async function updateMemory(key: string, value: string): Promise<void> {
   const res = await fetch(`${PROXY_URL}/memory`).catch(() => null);
   if (!res || !res.ok) return;
