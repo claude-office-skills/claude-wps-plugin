@@ -1,4 +1,4 @@
-import { memo, useEffect } from "react";
+import { memo } from "react";
 import type { AgentState, AgentStatus } from "../types";
 import styles from "./AgentTabBar.module.css";
 
@@ -8,8 +8,8 @@ interface AgentTabBarProps {
   onSwitch: (agentId: string) => void;
   onClose: (agentId: string) => void;
   onNew: () => void;
-  onOpenList: () => void;
-  visible: boolean;
+  onToggleList: () => void;
+  listExpanded: boolean;
 }
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
@@ -27,60 +27,35 @@ function tabLabel(agent: AgentState): string {
   return "新对话";
 }
 
+function SidebarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+    </svg>
+  );
+}
+
 function AgentTabBar({
   agents,
   activeAgentId,
   onSwitch,
   onClose,
   onNew,
-  onOpenList,
-  visible,
+  onToggleList,
+  listExpanded,
 }: AgentTabBarProps) {
-  useEffect(() => {
-    if (!visible) return;
-    const handler = (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey;
-      if (!isMod) return;
-
-      if (e.key === "t" && e.shiftKey) {
-        e.preventDefault();
-        onNew();
-        return;
-      }
-
-      if (e.key === "w") {
-        e.preventDefault();
-        onClose(activeAgentId);
-        return;
-      }
-
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const idx = agents.findIndex((a) => a.id === activeAgentId);
-        const next = e.shiftKey
-          ? (idx - 1 + agents.length) % agents.length
-          : (idx + 1) % agents.length;
-        onSwitch(agents[next].id);
-        return;
-      }
-
-      const num = parseInt(e.key, 10);
-      if (num >= 1 && num <= 9 && num <= agents.length) {
-        e.preventDefault();
-        onSwitch(agents[num - 1].id);
-      }
-    };
-
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [visible, agents, activeAgentId, onSwitch, onClose, onNew]);
-
-  if (!visible) return null;
-
   const visibleAgents = agents.slice(0, 8);
 
   return (
     <div className={styles.tabBar}>
+      <button
+        className={`${styles.sidebarToggle} ${listExpanded ? styles.sidebarToggleActive : ""}`}
+        onClick={onToggleList}
+        title={listExpanded ? "收起 Agents (⌘B)" : "展开 Agents (⌘B)"}
+      >
+        <SidebarIcon />
+      </button>
       <div className={styles.tabs}>
         {visibleAgents.map((agent) => {
           const isActive = agent.id === activeAgentId;
@@ -114,29 +89,6 @@ function AgentTabBar({
         })}
       </div>
       <div className={styles.actions}>
-        <button
-          className={styles.listBtn}
-          onClick={onOpenList}
-          title="所有 Agents"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="8" y1="6" x2="21" y2="6" />
-            <line x1="8" y1="12" x2="21" y2="12" />
-            <line x1="8" y1="18" x2="21" y2="18" />
-            <line x1="3" y1="6" x2="3.01" y2="6" />
-            <line x1="3" y1="12" x2="3.01" y2="12" />
-            <line x1="3" y1="18" x2="3.01" y2="18" />
-          </svg>
-        </button>
         <button
           className={styles.newBtn}
           onClick={onNew}

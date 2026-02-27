@@ -73,11 +73,9 @@ export default function App() {
   } | null>(null);
 
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [agentListOpen, setAgentListOpen] = useState(false);
+  const [agentListOpen, setAgentListOpen] = useState(true);
 
   const [inputBoxHeight, setInputBoxHeight] = useState(120);
-  const showTabBar = agents.length > 1;
-
   const abortRef = useRef<AbortController | null>(null);
   const lastSentInputRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -238,6 +236,17 @@ export default function App() {
     };
     document.addEventListener("keydown", handleGlobalCopy);
     return () => document.removeEventListener("keydown", handleGlobalCopy);
+  }, []);
+
+  useEffect(() => {
+    const handleSidebarToggle = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "b") {
+        e.preventDefault();
+        setAgentListOpen((v) => !v);
+      }
+    };
+    document.addEventListener("keydown", handleSidebarToggle);
+    return () => document.removeEventListener("keydown", handleSidebarToggle);
   }, []);
 
   // 自动滚动到底部 — 流式时直接跳转，非流式时平滑
@@ -483,6 +492,11 @@ ${code}
     let thinkingText = "";
     const thinkingStart = Date.now();
     let firstTokenReceived = false;
+    let aborted = false;
+
+    controller.signal.addEventListener("abort", () => {
+      aborted = true;
+    });
 
     const modeSnapshot = currentMode;
 
@@ -493,6 +507,7 @@ ${code}
         wpsCtx ?? { workbookName: "", sheetNames: [], selection: null },
         {
           onThinking: (text) => {
+            if (aborted) return;
             thinkingText += text;
             updateActiveMessages((prev) =>
               prev.map((m) =>
@@ -503,6 +518,7 @@ ${code}
             );
           },
           onToken: (token) => {
+            if (aborted) return;
             fullText += token;
             const updates: Partial<ChatMessage> = { content: fullText };
             if (!firstTokenReceived) {
@@ -517,6 +533,7 @@ ${code}
             );
           },
           onComplete: async (text) => {
+            if (aborted) return;
             if (modeSnapshot === "ask") {
               const strippedText = text.replace(
                 /```[\w]*\n[\s\S]*?```/g,
@@ -930,7 +947,7 @@ ${code}
             <Claude.Color size={20} />
           </div>
           <div className={styles.logoName}>Claude for Excel</div>
-          <span className={styles.betaBadge}>v2</span>
+          <span className={styles.betaBadge}>v 1.0</span>
         </div>
         <div className={styles.headerActions}>
           <ThemeToggle theme={theme} onCycle={cycleTheme} />
@@ -941,73 +958,77 @@ ${code}
           >
             <HistoryIcon />
           </button>
-          <button
-            className={styles.headerBtn}
-            onClick={handleNewChat}
-            title="新 Agent"
-          >
-            <NewChatIcon />
-          </button>
         </div>
       </header>
 
-      {/* Multi-Agent Tab 栏 */}
-      <AgentTabBar
-        agents={agents}
-        activeAgentId={activeAgentId}
-        onSwitch={switchAgent}
-        onClose={removeAgent}
-        onNew={handleNewChat}
-        onOpenList={() => setAgentListOpen(true)}
-        visible={showTabBar}
-      />
+      {/* 主体区域：Cursor 风格左侧 Agent 侧边栏 + 右侧聊天列 */}
+      <div className={styles.mainBody}>
+        <AgentListPanel
+          agents={agents}
+          activeAgentId={activeAgentId}
+          expanded={agentListOpen}
+          onSwitch={switchAgent}
+          onNew={handleNewChat}
+          onRemove={removeAgent}
+        />
 
-      {/* 选区上下文条 */}
-      {wpsCtx?.selection && (
-        <div className={styles.ctxBar}>
-          <TableIcon />
-          <span className={styles.ctxText}>
-            {wpsCtx.selection.sheetName}!{wpsCtx.selection.address}（
-            {wpsCtx.selection.rowCount} 行 × {wpsCtx.selection.colCount} 列）
-          </span>
-          <button
-            className={styles.ctxPinBtn}
-            onClick={handlePinSelection}
-            title="引用选区到输入框"
-          >
-            <PinIcon /> 引用
-          </button>
-          <span className={styles.ctxBadge}>
-            {isWpsAvailable() ? "WPS" : "mock"}
-          </span>
-        </div>
-      )}
-
-      {/* 代理服务器警告 */}
-      {proxyMissing && (
-        <div className={styles.warning}>
-          ⚠ 代理服务器未运行，请在终端执行：node proxy-server.js
-        </div>
-      )}
-
-      {/* 消息列表 */}
-      <div className={styles.chatArea}>
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            onCodeExecuted={handleCodeExecuted}
-            onApplyCode={handleApplyCode}
-            onRetryFix={handleRetryFix}
-            isApplying={applyingMsgId === msg.id}
-            onSwitchToAgent={handleSwitchToAgent}
+        <div className={styles.chatColumn}>
+          {/* Multi-Agent Tab 栏 — 始终固定在聊天列顶部 */}
+          <AgentTabBar
+            agents={agents}
+            activeAgentId={activeAgentId}
+            onSwitch={switchAgent}
+            onClose={removeAgent}
+            onNew={handleNewChat}
+            onToggleList={() => setAgentListOpen((v) => !v)}
+            listExpanded={agentListOpen}
           />
-        ))}
-        <div ref={bottomRef} />
-      </div>
 
-      {/* 输入区 */}
-      <div className={styles.inputArea}>
+          {/* 选区上下文条 */}
+          {wpsCtx?.selection && (
+            <div className={styles.ctxBar}>
+              <TableIcon />
+              <span className={styles.ctxText}>
+                {wpsCtx.selection.sheetName}!{wpsCtx.selection.address}（
+                {wpsCtx.selection.rowCount} 行 × {wpsCtx.selection.colCount} 列）
+              </span>
+              <button
+                className={styles.ctxPinBtn}
+                onClick={handlePinSelection}
+                title="引用选区到输入框"
+              >
+                <PinIcon /> 引用
+              </button>
+              <span className={styles.ctxBadge}>
+                {isWpsAvailable() ? "WPS" : "mock"}
+              </span>
+            </div>
+          )}
+
+          {proxyMissing && (
+            <div className={styles.warning}>
+              ⚠ 代理服务器未运行，请在终端执行：node proxy-server.js
+            </div>
+          )}
+
+          {/* 消息列表 */}
+          <div className={styles.chatArea}>
+            {messages.map((msg) => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onCodeExecuted={handleCodeExecuted}
+                onApplyCode={handleApplyCode}
+                onRetryFix={handleRetryFix}
+                isApplying={applyingMsgId === msg.id}
+                onSwitchToAgent={handleSwitchToAgent}
+              />
+            ))}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* 输入区 */}
+          <div className={styles.inputArea}>
         {/* 智能快捷卡片 - 水平滚动行 */}
         <QuickActionCards
           hasSelection={!!wpsCtx?.selection}
@@ -1132,22 +1153,9 @@ ${code}
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Agents 列表面板 */}
-      {agentListOpen && (
-        <AgentListPanel
-          agents={agents}
-          activeAgentId={activeAgentId}
-          onSwitch={switchAgent}
-          onNew={() => {
-            handleNewChat();
-            setAgentListOpen(false);
-          }}
-          onClose={() => setAgentListOpen(false)}
-          onRemove={removeAgent}
-        />
-      )}
+          </div>
+        </div>{/* end chatColumn */}
+      </div>{/* end mainBody */}
 
       <HistoryPanel
         visible={historyOpen}
@@ -1236,25 +1244,6 @@ function StopIcon() {
       stroke="none"
     >
       <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  );
-}
-
-function NewChatIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-      <line x1="9" y1="10" x2="15" y2="10" />
-      <line x1="12" y1="7" x2="12" y2="13" />
     </svg>
   );
 }

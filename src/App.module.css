@@ -143,6 +143,20 @@
 }
 
 /* 消息滚动区 */
+/* 主体区域：侧边栏 + 聊天列并排 */
+.mainBody {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.chatColumn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .chatArea {
   flex: 1;
   overflow-y: auto;
@@ -173,6 +187,8 @@
   border-top: 1px solid var(--bg-elevated);
   display: flex;
   flex-direction: column;
+  overflow: visible;
+  position: relative;
   gap: 8px;
 }
 
@@ -185,6 +201,7 @@
   position: relative;
   border: 1px solid transparent;
   transition: border-color 0.15s;
+  overflow: hidden;
 }
 
 .inputBox:focus-within {
@@ -222,6 +239,7 @@
   padding: 6px 10px 6px 14px;
   gap: 4px;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 

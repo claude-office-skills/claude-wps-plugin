@@ -1122,6 +1122,31 @@ app.post("/chat", (req, res) => {
   let _firstTokenTime = 0;
   let _firstThinkTime = 0;
 
+  let _streamChunkQueue = [];
+  let _chunkDraining = false;
+
+  function _drainChunks() {
+    if (_chunkDraining || _streamChunkQueue.length === 0) return;
+    _chunkDraining = true;
+    const chunk = _streamChunkQueue.shift();
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+    const delay = chunk.type === "thinking" ? 8 : 15;
+    setTimeout(() => {
+      _chunkDraining = false;
+      _drainChunks();
+    }, delay);
+  }
+
+  function _enqueueText(fullText, type) {
+    const chunkSize = type === "thinking" ? 30 : 12;
+    for (let i = 0; i < fullText.length; i += chunkSize) {
+      _streamChunkQueue.push({ type, text: fullText.slice(i, i + chunkSize) });
+    }
+    _drainChunks();
+  }
+
   child.stdout.on("data", (data) => {
     _lineBuf += data.toString();
     const lines = _lineBuf.split("\n");
@@ -1135,7 +1160,6 @@ app.post("/chat", (req, res) => {
 
         if (evt.type === "stream_event") {
           const se = evt.event;
-
           if (se.type === "content_block_delta") {
             if (se.delta?.type === "text_delta" && se.delta.text) {
               if (!_firstTokenTime) _firstTokenTime = Date.now();
@@ -1155,11 +1179,26 @@ app.post("/chat", (req, res) => {
               );
             }
           }
-        } else if (evt.type === "result" && evt.result) {
-          resultText = evt.result;
+        } else if (evt.type === "assistant" && evt.message?.content) {
+          if (!_firstTokenTime) _firstTokenTime = Date.now();
+          for (const block of evt.message.content) {
+            if (block.type === "thinking" && block.thinking) {
+              _thinkingText += block.thinking;
+              _enqueueText(block.thinking, "thinking");
+            } else if (block.type === "text" && block.text) {
+              resultText += block.text;
+              _enqueueText(block.text, "token");
+            }
+          }
+        } else if (evt.type === "result") {
+          const rt =
+            typeof evt.result === "string"
+              ? evt.result
+              : evt.result?.text || "";
+          if (rt && !resultText) resultText = rt;
         }
       } catch {
-        // non-JSON line — ignore system/verbose output
+        // non-JSON line — ignore
       }
     }
   });
@@ -1199,9 +1238,22 @@ app.post("/chat", (req, res) => {
         `data: ${JSON.stringify({ type: "error", message: userMsg })}\n\n`,
       );
     } else {
-      res.write(
-        `data: ${JSON.stringify({ type: "done", fullText: resultText.trim() })}\n\n`,
-      );
+      const _finalize = () => {
+        if (_streamChunkQueue.length > 0 || _chunkDraining) {
+          setTimeout(_finalize, 50);
+          return;
+        }
+        if (!res.writableEnded) {
+          res.write(
+            `data: ${JSON.stringify({ type: "done", fullText: resultText.trim() })}\n\n`,
+          );
+        }
+        clearInterval(keepalive);
+        responseDone = true;
+        res.end();
+      };
+      _finalize();
+      return;
     }
     clearInterval(keepalive);
     responseDone = true;

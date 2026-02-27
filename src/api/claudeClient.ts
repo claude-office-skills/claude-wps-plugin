@@ -211,7 +211,9 @@ export async function sendMessage(
 
     xhr.onerror = () => {
       if (aborted) {
-        callbacks.onComplete(fullTextRef.v || "（已中止生成）");
+        if (fullTextRef.v) {
+          callbacks.onComplete(fullTextRef.v);
+        }
         resolve();
         return;
       }
@@ -219,7 +221,9 @@ export async function sendMessage(
     };
 
     xhr.onabort = () => {
-      callbacks.onComplete(fullTextRef.v || "（已中止生成）");
+      if (fullTextRef.v) {
+        callbacks.onComplete(fullTextRef.v);
+      }
       resolve();
     };
 
