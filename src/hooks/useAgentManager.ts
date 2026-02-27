@@ -9,6 +9,9 @@ import type {
 
 const STORAGE_KEY = "wps-claude-agents-v2";
 const MAX_PERSISTED_AGENTS = 20;
+const MAX_AGENTS = 12;
+const MAX_CONCURRENT_RUNNING = 3;
+const MAX_MESSAGES_PER_AGENT = 100;
 
 const WELCOME_MESSAGE: ChatMessage = {
   id: "welcome",
@@ -76,11 +79,32 @@ export interface AgentManagerActions {
   updateActiveMessages: (
     updater: (prev: ChatMessage[]) => ChatMessage[],
   ) => void;
+  updateAgentMessages: (
+    agentId: string,
+    updater: (prev: ChatMessage[]) => ChatMessage[],
+  ) => void;
   setActiveStatus: (status: AgentStatus, error?: string) => void;
+  setAgentStatus: (agentId: string, status: AgentStatus, error?: string) => void;
   setActiveName: (name: string) => void;
+  setAgentName: (agentId: string, name: string) => void;
   setActiveMode: (mode: InteractionMode) => void;
   setActiveModel: (model: string) => void;
   getAgent: (agentId: string) => AgentState | undefined;
+  /** Per-agent AbortController for parallel requests */
+  createAbortController: (agentId: string) => AbortController;
+  abortAgent: (agentId: string) => void;
+  getAbortController: (agentId: string) => AbortController | undefined;
+  isAgentLoading: (agentId: string) => boolean;
+  /** Returns count of currently running agents */
+  runningCount: () => number;
+  /** Whether a new request can be started (under concurrency limit) */
+  canStartRequest: () => boolean;
+  /** Prune old idle agents to keep total under MAX_AGENTS */
+  pruneIdleAgents: () => void;
+  /** Trim messages for an agent to MAX_MESSAGES_PER_AGENT */
+  trimAgentMessages: (agentId: string) => void;
+  /** Concurrency & resource limits for UI display */
+  limits: { maxConcurrent: number; maxAgents: number; maxMessages: number };
   loadAgentsFromSessions: (
     sessions: Array<{
       id: string;
@@ -98,6 +122,7 @@ export interface AgentManagerState {
   agents: AgentState[];
   activeAgentId: string;
   activeAgent: AgentState;
+  runningAgentCount: number;
 }
 
 export function useAgentManager(): AgentManagerState & AgentManagerActions {
@@ -112,6 +137,8 @@ export function useAgentManager(): AgentManagerState & AgentManagerActions {
 
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -146,6 +173,11 @@ export function useAgentManager(): AgentManagerState & AgentManagerActions {
   }, []);
 
   const removeAgent = useCallback((agentId: string) => {
+    const ctrl = abortControllersRef.current.get(agentId);
+    if (ctrl) {
+      ctrl.abort();
+      abortControllersRef.current.delete(agentId);
+    }
     setAgents((prev) => {
       const filtered = prev.filter((a) => a.id !== agentId);
       if (filtered.length === 0) {
@@ -187,11 +219,31 @@ export function useAgentManager(): AgentManagerState & AgentManagerActions {
     [activeAgentId],
   );
 
+  const updateAgentMessages = useCallback(
+    (agentId: string, updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === agentId
+            ? { ...a, messages: updater(a.messages), updatedAt: Date.now() }
+            : a,
+        ),
+      );
+    },
+    [],
+  );
+
   const setActiveStatus = useCallback(
     (status: AgentStatus, error?: string) => {
       updateAgent(activeAgentId, { status, error });
     },
     [activeAgentId, updateAgent],
+  );
+
+  const setAgentStatus = useCallback(
+    (agentId: string, status: AgentStatus, error?: string) => {
+      updateAgent(agentId, { status, error });
+    },
+    [updateAgent],
   );
 
   const setActiveName = useCallback(
@@ -200,6 +252,70 @@ export function useAgentManager(): AgentManagerState & AgentManagerActions {
     },
     [activeAgentId, updateAgent],
   );
+
+  const setAgentName = useCallback(
+    (agentId: string, name: string) => {
+      updateAgent(agentId, { name });
+    },
+    [updateAgent],
+  );
+
+  const createAbortController = useCallback((agentId: string) => {
+    const existing = abortControllersRef.current.get(agentId);
+    if (existing) existing.abort();
+    const controller = new AbortController();
+    abortControllersRef.current.set(agentId, controller);
+    return controller;
+  }, []);
+
+  const abortAgent = useCallback((agentId: string) => {
+    const ctrl = abortControllersRef.current.get(agentId);
+    if (ctrl) {
+      ctrl.abort();
+      abortControllersRef.current.delete(agentId);
+    }
+  }, []);
+
+  const getAbortController = useCallback((agentId: string) => {
+    return abortControllersRef.current.get(agentId);
+  }, []);
+
+  const isAgentLoading = useCallback((agentId: string) => {
+    return agentsRef.current.some((a) => a.id === agentId && a.status === "running");
+  }, []);
+
+  const runningCount = useCallback(() => {
+    return agentsRef.current.filter((a) => a.status === "running").length;
+  }, []);
+
+  const canStartRequest = useCallback(() => {
+    return agentsRef.current.filter((a) => a.status === "running").length < MAX_CONCURRENT_RUNNING;
+  }, []);
+
+  const runningAgentCount = agents.filter((a) => a.status === "running").length;
+
+  const pruneIdleAgents = useCallback(() => {
+    setAgents((prev) => {
+      if (prev.length <= MAX_AGENTS) return prev;
+      const running = prev.filter((a) => a.status === "running");
+      const nonRunning = prev.filter((a) => a.status !== "running");
+      nonRunning.sort((a, b) => b.updatedAt - a.updatedAt);
+      const kept = nonRunning.slice(0, MAX_AGENTS - running.length);
+      return [...running, ...kept].sort((a, b) => b.updatedAt - a.updatedAt);
+    });
+  }, []);
+
+  const trimAgentMessages = useCallback((agentId: string) => {
+    setAgents((prev) =>
+      prev.map((a) => {
+        if (a.id !== agentId || a.messages.length <= MAX_MESSAGES_PER_AGENT) return a;
+        const trimmed = a.messages.slice(-MAX_MESSAGES_PER_AGENT);
+        return { ...a, messages: trimmed, updatedAt: Date.now() };
+      }),
+    );
+  }, []);
+
+  const limits = { maxConcurrent: MAX_CONCURRENT_RUNNING, maxAgents: MAX_AGENTS, maxMessages: MAX_MESSAGES_PER_AGENT };
 
   const setActiveMode = useCallback(
     (mode: InteractionMode) => {
@@ -256,15 +372,28 @@ export function useAgentManager(): AgentManagerState & AgentManagerActions {
     agents,
     activeAgentId,
     activeAgent,
+    runningAgentCount,
     createNewAgent,
     switchAgent,
     removeAgent,
     updateActiveMessages,
+    updateAgentMessages,
     setActiveStatus,
+    setAgentStatus,
     setActiveName,
+    setAgentName,
     setActiveMode,
     setActiveModel,
     getAgent,
+    createAbortController,
+    abortAgent,
+    getAbortController,
+    isAgentLoading,
+    runningCount,
+    canStartRequest,
+    pruneIdleAgents,
+    trimAgentMessages,
+    limits,
     loadAgentsFromSessions,
   };
 }

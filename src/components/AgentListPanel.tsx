@@ -6,6 +6,7 @@ interface AgentListPanelProps {
   agents: AgentState[];
   activeAgentId: string;
   expanded: boolean;
+  width: number;
   onSwitch: (agentId: string) => void;
   onNew: () => void;
   onRemove: (agentId: string) => void;
@@ -55,6 +56,7 @@ function AgentListPanel({
   agents,
   activeAgentId,
   expanded,
+  width,
   onSwitch,
   onNew,
   onRemove,
@@ -89,7 +91,7 @@ function AgentListPanel({
   if (!expanded) return null;
 
   return (
-    <div className={styles.sidebar}>
+    <div className={styles.sidebar} style={{ width, minWidth: width }}>
       {/* 顶部：Search + New Agent */}
       <div className={styles.topBar}>
         <div className={styles.searchWrap}>

@@ -80,6 +80,14 @@
   background: var(--bg-hover);
 }
 
+.headerBtnActive {
+  color: var(--accent-color, #D97757);
+}
+
+.headerBtnActive:hover {
+  color: var(--accent-color, #D97757);
+}
+
 /* 选区上下文条 */
 .ctxBar {
   display: flex;
@@ -150,6 +158,23 @@
   overflow: hidden;
 }
 
+/* 侧边栏拖拽 resize handle */
+.sidebarResizeHandle {
+  width: 4px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  margin-left: -2px;
+  margin-right: -2px;
+  transition: background 0.15s;
+}
+
+.sidebarResizeHandle:hover,
+.sidebarResizeHandle:active {
+  background: var(--accent-color, #D97757);
+}
+
 .chatColumn {
   flex: 1;
   display: flex;
@@ -201,7 +226,7 @@
   position: relative;
   border: 1px solid transparent;
   transition: border-color 0.15s;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .inputBox:focus-within {

@@ -3,39 +3,9 @@
   align-items: center;
   background: var(--bg-secondary, #1e1e1e);
   padding: 0 6px;
-  min-height: 34px;
+  min-height: 32px;
   border-bottom: 1px solid var(--border-color, #2a2a2a);
   overflow: hidden;
-  gap: 2px;
-}
-
-/* Cursor 风格侧边栏 toggle 按钮 */
-.sidebarToggle {
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-secondary, #888);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
-}
-
-.sidebarToggle:hover {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #ddd);
-}
-
-.sidebarToggleActive {
-  color: var(--accent-color, #D97757);
-}
-
-.sidebarToggleActive:hover {
-  color: var(--accent-color, #D97757);
 }
 
 .tabs {
@@ -62,9 +32,9 @@
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  border-radius: 6px 6px 0 0;
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
+  position: relative;
 }
 
 .tab:hover {
@@ -73,15 +43,14 @@
 }
 
 .tab.active {
-  background: var(--bg-primary, #1a1a1a);
   color: var(--text-primary, #fff);
   font-weight: 600;
-  border-top: 2px solid var(--accent-color, #D97757);
+  box-shadow: inset 0 -2px 0 var(--text-tertiary, #555);
 }
 
 .statusDot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -96,7 +65,7 @@
 }
 
 .tabLabel {
-  max-width: 80px;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -124,33 +93,6 @@
   color: #ef4444;
 }
 
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-left: 6px;
-  flex-shrink: 0;
-}
-
-.newBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  cursor: pointer;
-  transition: background 0.15s;
-  background: var(--accent-color, #D97757);
-  color: #fff;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.newBtn:hover {
-  opacity: 0.85;
-}
-
 /* Light theme */
 [data-theme="light"] .tabBar {
   background: #f0f0f0;
@@ -167,10 +109,6 @@
 }
 
 [data-theme="light"] .tab.active {
-  background: #fff;
   color: #111;
-}
-
-[data-theme="light"] .sidebarToggle:hover {
-  background: #e0e0e0;
+  box-shadow: inset 0 -2px 0 #999;
 }

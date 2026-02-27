@@ -47,10 +47,17 @@ export default function App() {
     switchAgent,
     removeAgent,
     updateActiveMessages,
+    updateAgentMessages,
     setActiveStatus,
+    setAgentStatus,
     setActiveName,
     setActiveMode,
     setActiveModel,
+    createAbortController,
+    abortAgent,
+    canStartRequest,
+    pruneIdleAgents,
+    limits,
   } = agentMgr;
 
   const messages = activeAgent.messages;
@@ -59,7 +66,6 @@ export default function App() {
 
   const [input, setInput] = useState("");
   const [wpsCtx, setWpsCtx] = useState<WpsContext | null>(null);
-  const [loading, setLoading] = useState(false);
   const [proxyMissing, setProxyMissing] = useState(false);
   const [applyingMsgId, setApplyingMsgId] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachmentFile[]>([]);
@@ -75,8 +81,47 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentListOpen, setAgentListOpen] = useState(true);
 
+  const SIDEBAR_MIN = 140;
+  const SIDEBAR_MAX = 360;
+  const SIDEBAR_DEFAULT = 200;
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("wps-sidebar-width");
+      if (saved) {
+        const v = parseInt(saved, 10);
+        if (v >= SIDEBAR_MIN && v <= SIDEBAR_MAX) return v;
+      }
+    } catch { /* ignore */ }
+    return SIDEBAR_DEFAULT;
+  });
+
+  const sidebarDragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
+
+  const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    sidebarDragRef.current = { startX: e.clientX, startW: sidebarWidthRef.current };
+    const onMove = (ev: MouseEvent) => {
+      if (!sidebarDragRef.current) return;
+      const delta = ev.clientX - sidebarDragRef.current.startX;
+      const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, sidebarDragRef.current.startW + delta));
+      setSidebarWidth(next);
+    };
+    const onUp = () => {
+      try { localStorage.setItem("wps-sidebar-width", String(sidebarWidthRef.current)); } catch { /* ignore */ }
+      sidebarDragRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
+
+  const loading = activeAgent.status === "running";
+
   const [inputBoxHeight, setInputBoxHeight] = useState(120);
-  const abortRef = useRef<AbortController | null>(null);
   const lastSentInputRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -328,12 +373,12 @@ export default function App() {
     [updateActiveMessages],
   );
 
-  const loadingRef = useRef(loading);
-  loadingRef.current = loading;
-
   const handleSendRef = useRef<(text?: string) => Promise<void>>(
     null as unknown as (text?: string) => Promise<void>,
   );
+
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
 
   const handleRetryFix = useCallback(
     (code: string, error: string, language: string) => {
@@ -420,16 +465,12 @@ ${code}
   }, []);
 
   const handleNewChat = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
+    pruneIdleAgents();
     createNewAgent();
-    setLoading(false);
     setApplyingMsgId(null);
     setPinnedSelection(null);
     setAttachedFiles([]);
-  }, [createNewAgent]);
+  }, [createNewAgent, pruneIdleAgents]);
 
   const handleSwitchToAgent = useCallback(() => {
     setActiveMode("agent");
@@ -439,6 +480,21 @@ ${code}
     const userText = (text ?? input).trim();
     if (!userText || loading) return;
 
+    if (!canStartRequest()) {
+      updateActiveMessages((prev) => [
+        ...prev,
+        {
+          id: nanoid(),
+          role: "assistant",
+          content: `**提示**：当前已有 ${limits.maxConcurrent} 个 Agent 正在并行运行，请等待其中一个完成后再发送。`,
+          timestamp: Date.now(),
+          isError: true,
+        },
+      ]);
+      return;
+    }
+
+    const agentId = activeAgentId;
     const currentAttachments = [...attachedFiles];
     const currentPinned = pinnedSelection;
     lastSentInputRef.current = userText;
@@ -481,12 +537,10 @@ ${code}
       isStreaming: true,
     };
 
-    updateActiveMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setActiveStatus("running");
-    setLoading(true);
+    updateAgentMessages(agentId, (prev) => [...prev, userMsg, assistantMsg]);
+    setAgentStatus(agentId, "running");
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const controller = createAbortController(agentId);
 
     let fullText = "";
     let thinkingText = "";
@@ -499,6 +553,7 @@ ${code}
     });
 
     const modeSnapshot = currentMode;
+    const modelSnapshot = selectedModel;
 
     try {
       await sendMessage(
@@ -509,7 +564,7 @@ ${code}
           onThinking: (text) => {
             if (aborted) return;
             thinkingText += text;
-            updateActiveMessages((prev) =>
+            updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? { ...m, thinkingContent: thinkingText }
@@ -526,7 +581,7 @@ ${code}
               updates.thinkingMs = Date.now() - thinkingStart;
               setProxyMissing(false);
             }
-            updateActiveMessages((prev) =>
+            updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId ? { ...m, ...updates } : m,
               ),
@@ -545,7 +600,7 @@ ${code}
                 /切换.{0,4}Agent|switch.{0,6}agent|需要执行|需要操作|建议.{0,4}Agent/i;
               const suggestSwitch = hadCode || ACTION_HINTS.test(text);
 
-              updateActiveMessages((prev) =>
+              updateAgentMessages(agentId, (prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
                     ? {
@@ -558,8 +613,7 @@ ${code}
                     : m,
                 ),
               );
-              setActiveStatus("done");
-              setLoading(false);
+              setAgentStatus(agentId, "done");
               return;
             }
 
@@ -570,7 +624,7 @@ ${code}
               code: b.code,
             }));
 
-            updateActiveMessages((prev) =>
+            updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? { ...m, content: text, isStreaming: false, codeBlocks }
@@ -587,9 +641,9 @@ ${code}
                 try {
                   const { result, diff } = await executeCode(
                     block.code,
-                    activeAgentId,
+                    agentId,
                   );
-                  updateActiveMessages((prev) =>
+                  updateAgentMessages(agentId, (prev) =>
                     prev.map((m) => {
                       if (m.id !== assistantMsgId) return m;
                       const updated = m.codeBlocks?.map((b) =>
@@ -603,7 +657,7 @@ ${code}
                 } catch (err) {
                   const errorMsg =
                     err instanceof Error ? err.message : String(err);
-                  updateActiveMessages((prev) =>
+                  updateAgentMessages(agentId, (prev) =>
                     prev.map((m) => {
                       if (m.id !== assistantMsgId) return m;
                       const updated = m.codeBlocks?.map((b) =>
@@ -614,21 +668,20 @@ ${code}
                       return { ...m, codeBlocks: updated };
                     }),
                   );
-                  setActiveStatus("failed", errorMsg);
+                  setAgentStatus(agentId, "failed", errorMsg);
                   break;
                 }
               }
               setApplyingMsgId(null);
             }
-            setActiveStatus("done");
-            setLoading(false);
+            setAgentStatus(agentId, "done");
           },
           onError: (err) => {
             const isProxyError =
               err.message.includes("fetch") ||
               err.message.includes("Failed") ||
               err.message.includes("代理");
-            updateActiveMessages((prev) =>
+            updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? {
@@ -642,14 +695,13 @@ ${code}
                   : m,
               ),
             );
-            setActiveStatus("failed", err.message);
+            setAgentStatus(agentId, "failed", err.message);
             setProxyMissing(true);
-            setLoading(false);
           },
         },
         {
-          model: selectedModel,
-          mode: currentMode,
+          model: modelSnapshot,
+          mode: modeSnapshot,
           attachments:
             currentAttachments.length > 0 ? currentAttachments : undefined,
           signal: controller.signal,
@@ -661,7 +713,7 @@ ${code}
         unexpectedErr instanceof Error
           ? unexpectedErr.message
           : String(unexpectedErr);
-      updateActiveMessages((prev) =>
+      updateAgentMessages(agentId, (prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
             ? {
@@ -673,22 +725,21 @@ ${code}
             : m,
         ),
       );
-      setActiveStatus("failed", errMsg);
-      setLoading(false);
+      setAgentStatus(agentId, "failed", errMsg);
       setApplyingMsgId(null);
     }
 
-    abortRef.current = null;
+    if (aborted) {
+      setAgentStatus(agentId, "idle");
+    }
+
     lastSentInputRef.current = "";
   };
 
   handleSendRef.current = handleSend;
 
   const handleStop = () => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
+    abortAgent(activeAgentId);
 
     const savedInput = lastSentInputRef.current;
     lastSentInputRef.current = "";
@@ -702,7 +753,6 @@ ${code}
 
     setActiveStatus("idle");
     setInput(savedInput);
-    setLoading(false);
 
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -950,7 +1000,20 @@ ${code}
           <span className={styles.betaBadge}>v 1.0</span>
         </div>
         <div className={styles.headerActions}>
-          <ThemeToggle theme={theme} onCycle={cycleTheme} />
+          <button
+            className={`${styles.headerBtn} ${agentListOpen ? styles.headerBtnActive : ""}`}
+            onClick={() => setAgentListOpen((v) => !v)}
+            title={agentListOpen ? "收起 Agents (⌘B)" : "展开 Agents (⌘B)"}
+          >
+            <SidebarToggleIcon />
+          </button>
+          <button
+            className={styles.headerBtn}
+            onClick={handleNewChat}
+            title="新建 Agent"
+          >
+            <AddIcon />
+          </button>
           <button
             className={styles.headerBtn}
             onClick={handleOpenHistory}
@@ -958,6 +1021,7 @@ ${code}
           >
             <HistoryIcon />
           </button>
+          <ThemeToggle theme={theme} onCycle={cycleTheme} />
         </div>
       </header>
 
@@ -967,22 +1031,29 @@ ${code}
           agents={agents}
           activeAgentId={activeAgentId}
           expanded={agentListOpen}
+          width={sidebarWidth}
           onSwitch={switchAgent}
           onNew={handleNewChat}
           onRemove={removeAgent}
         />
 
-        <div className={styles.chatColumn}>
-          {/* Multi-Agent Tab 栏 — 始终固定在聊天列顶部 */}
-          <AgentTabBar
-            agents={agents}
-            activeAgentId={activeAgentId}
-            onSwitch={switchAgent}
-            onClose={removeAgent}
-            onNew={handleNewChat}
-            onToggleList={() => setAgentListOpen((v) => !v)}
-            listExpanded={agentListOpen}
+        {agentListOpen && (
+          <div
+            className={styles.sidebarResizeHandle}
+            onMouseDown={handleSidebarDragStart}
           />
+        )}
+
+        <div className={styles.chatColumn}>
+          {/* Tab 栏 — 仅在侧边栏收起时显示 */}
+          {!agentListOpen && (
+            <AgentTabBar
+              agents={agents}
+              activeAgentId={activeAgentId}
+              onSwitch={switchAgent}
+              onClose={removeAgent}
+            />
+          )}
 
           {/* 选区上下文条 */}
           {wpsCtx?.selection && (
@@ -1164,10 +1235,7 @@ ${code}
         onSelectSession={async (id) => {
           const session = await loadSession(id);
           if (!session) return;
-          if (abortRef.current) {
-            abortRef.current.abort();
-            abortRef.current = null;
-          }
+          abortAgent(activeAgentId);
           agentMgr.loadAgentsFromSessions([
             {
               id: session.id,
@@ -1176,11 +1244,28 @@ ${code}
               model: session.model,
             },
           ]);
-          setLoading(false);
           setApplyingMsgId(null);
         }}
       />
     </div>
+  );
+}
+
+function SidebarToggleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+    </svg>
+  );
+}
+
+function AddIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
   );
 }
 
