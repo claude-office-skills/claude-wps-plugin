@@ -10,6 +10,7 @@ import HistoryPanel from "./components/HistoryPanel";
 import ThemeToggle from "./components/ThemeToggle";
 import AgentTabBar from "./components/AgentTabBar";
 import AgentListPanel from "./components/AgentListPanel";
+import UpdateNotification from "./components/UpdateNotification";
 import { useTheme } from "./hooks/useTheme";
 import { useAgentManager } from "./hooks/useAgentManager";
 import { sendMessage, extractCodeBlocks, checkProxy } from "./api/claudeClient";
@@ -33,8 +34,25 @@ import type {
   CodeBlock,
   AttachmentFile,
   InteractionMode,
+  PlanStep,
 } from "./types";
 import styles from "./App.module.css";
+
+const PLAN_STEP_RE = /^(?:\d+)[.)]\s+(.+)$/;
+
+function parsePlanSteps(text: string, mode: string): PlanStep[] | undefined {
+  if (mode !== "plan") return undefined;
+  const lines = text.split("\n");
+  const steps: PlanStep[] = [];
+  let idx = 1;
+  for (const line of lines) {
+    const m = PLAN_STEP_RE.exec(line.trim());
+    if (m) {
+      steps.push({ index: idx++, text: m[1].trim(), done: false });
+    }
+  }
+  return steps.length >= 2 ? steps : undefined;
+}
 
 export default function App() {
   const { theme, cycleTheme } = useTheme();
@@ -92,25 +110,42 @@ export default function App() {
         const v = parseInt(saved, 10);
         if (v >= SIDEBAR_MIN && v <= SIDEBAR_MAX) return v;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return SIDEBAR_DEFAULT;
   });
 
-  const sidebarDragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const sidebarDragRef = useRef<{ startX: number; startW: number } | null>(
+    null,
+  );
   const sidebarWidthRef = useRef(sidebarWidth);
   sidebarWidthRef.current = sidebarWidth;
 
   const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    sidebarDragRef.current = { startX: e.clientX, startW: sidebarWidthRef.current };
+    sidebarDragRef.current = {
+      startX: e.clientX,
+      startW: sidebarWidthRef.current,
+    };
     const onMove = (ev: MouseEvent) => {
       if (!sidebarDragRef.current) return;
       const delta = ev.clientX - sidebarDragRef.current.startX;
-      const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, sidebarDragRef.current.startW + delta));
+      const next = Math.max(
+        SIDEBAR_MIN,
+        Math.min(SIDEBAR_MAX, sidebarDragRef.current.startW + delta),
+      );
       setSidebarWidth(next);
     };
     const onUp = () => {
-      try { localStorage.setItem("wps-sidebar-width", String(sidebarWidthRef.current)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem(
+          "wps-sidebar-width",
+          String(sidebarWidthRef.current),
+        );
+      } catch {
+        /* ignore */
+      }
       sidebarDragRef.current = null;
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
@@ -123,6 +158,9 @@ export default function App() {
 
   const [inputBoxHeight, setInputBoxHeight] = useState(120);
   const lastSentInputRef = useRef<string>("");
+  const autoContinueRoundRef = useRef(0);
+  const maxAutoContinueRef = useRef(3);
+  const MAX_AUTO_CONTINUE_HARD_CAP = 8;
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -405,9 +443,30 @@ ${code}
     [],
   );
 
+  const [selectionDismissed, setSelectionDismissed] = useState(false);
+  const prevSelKeyRef = useRef("");
+
+  useEffect(() => {
+    if (!wpsCtx?.selection) {
+      prevSelKeyRef.current = "";
+      return;
+    }
+    const key = `${wpsCtx.selection.sheetName}!${wpsCtx.selection.address}`;
+    if (key !== prevSelKeyRef.current) {
+      prevSelKeyRef.current = key;
+      setSelectionDismissed(false);
+    }
+  }, [wpsCtx?.selection]);
+
+  const handleDismissSelection = useCallback(() => {
+    setSelectionDismissed(true);
+    setPinnedSelection(null);
+  }, []);
+
   const handlePinSelection = useCallback(() => {
     if (!wpsCtx?.selection) return;
     const sel = wpsCtx.selection;
+    setSelectionDismissed(false);
     setPinnedSelection({
       label: `${sel.sheetName}!${sel.address}`,
       address: sel.address,
@@ -476,9 +535,41 @@ ${code}
     setActiveMode("agent");
   }, [setActiveMode]);
 
-  const handleSend = async (text?: string) => {
+  const handlePlanStepsChange = useCallback(
+    (msgId: string, steps: PlanStep[]) => {
+      updateActiveMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, planSteps: steps } : m)),
+      );
+    },
+    [updateActiveMessages],
+  );
+
+  const handleConfirmPlan = useCallback(
+    (_msgId: string, steps: PlanStep[]) => {
+      const planText = steps.map((s) => `${s.index}. ${s.text}`).join("\n");
+      const prompt = `请按以下已确认的计划逐步执行：\n\n${planText}\n\n请从第 1 步开始，每步生成可执行的代码。`;
+      setActiveMode("agent");
+      handleSend(prompt);
+    },
+    [setActiveMode],
+  );
+
+  const handleSend = async (text?: string, _autoContinue?: boolean) => {
     const userText = (text ?? input).trim();
-    if (!userText || loading) return;
+    if (!userText || (loading && !_autoContinue)) return;
+    if (!_autoContinue) {
+      autoContinueRoundRef.current = 0;
+      const COMPLEX_TASK =
+        /dcf|估值|建模|财务模型|完整.*模型|多.*sheet|多.*表|分析.*报告|全面|comprehensive/i;
+      const MEDIUM_TASK = /图表|chart|可视化|dashboard|仪表盘|对比.*分析|趋势/i;
+      if (COMPLEX_TASK.test(userText)) {
+        maxAutoContinueRef.current = MAX_AUTO_CONTINUE_HARD_CAP;
+      } else if (MEDIUM_TASK.test(userText)) {
+        maxAutoContinueRef.current = 4;
+      } else {
+        maxAutoContinueRef.current = 2;
+      }
+    }
 
     if (!canStartRequest()) {
       updateActiveMessages((prev) => [
@@ -526,6 +617,7 @@ ${code}
       role: "user",
       content: displayContent,
       timestamp: Date.now(),
+      isAutoContinue: !!_autoContinue,
     };
 
     const assistantMsgId = nanoid();
@@ -587,8 +679,20 @@ ${code}
               ),
             );
           },
-          onComplete: async (text) => {
+          onComplete: async (text, provenance, flags) => {
             if (aborted) return;
+            const tokenLimitHit = flags?.tokenLimitHit ?? false;
+            const prov = provenance
+              ? {
+                  mode: String(provenance.mode || ""),
+                  model: String(provenance.model || ""),
+                  skillsLoaded: Array.isArray(provenance.skillsLoaded)
+                    ? (provenance.skillsLoaded as string[])
+                    : [],
+                  promptSummary: String(provenance.promptSummary || ""),
+                  timestamp: Number(provenance.timestamp) || Date.now(),
+                }
+              : undefined;
             if (modeSnapshot === "ask") {
               const strippedText = text.replace(
                 /```[\w]*\n[\s\S]*?```/g,
@@ -609,6 +713,7 @@ ${code}
                         isStreaming: false,
                         codeBlocks: [],
                         suggestAgentSwitch: suggestSwitch,
+                        provenance: prov,
                       }
                     : m,
                 ),
@@ -623,25 +728,90 @@ ${code}
               language: b.language,
               code: b.code,
             }));
+            // #region agent log
+            fetch(
+              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "716a17",
+                },
+                body: JSON.stringify({
+                  sessionId: "716a17",
+                  location: "App.tsx:onComplete",
+                  message: "AI response parsed",
+                  data: {
+                    codeBlockCount: codeBlocks.length,
+                    tokenLimitHit: flags?.tokenLimitHit,
+                    round: autoContinueRoundRef.current,
+                    maxRound: maxAutoContinueRef.current,
+                    textLen: text.length,
+                    textPreview: text.slice(0, 200),
+                  },
+                  timestamp: Date.now(),
+                  hypothesisId: "H2",
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
+
+            const planSteps = parsePlanSteps(text, modeSnapshot);
 
             updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, content: text, isStreaming: false, codeBlocks }
+                  ? {
+                      ...m,
+                      content: text,
+                      isStreaming: false,
+                      codeBlocks,
+                      planSteps,
+                      provenance: prov,
+                    }
                   : m,
               ),
             );
 
             const shouldAutoExecute = modeSnapshot === "agent";
 
+            if (
+              tokenLimitHit &&
+              codeBlocks.length === 0 &&
+              shouldAutoExecute &&
+              !aborted &&
+              autoContinueRoundRef.current < maxAutoContinueRef.current
+            ) {
+              autoContinueRoundRef.current++;
+              const round = autoContinueRoundRef.current;
+              const originalUserMsg =
+                messagesRef.current.find(
+                  (m) => m.role === "user" && !m.isAutoContinue,
+                )?.content || "";
+              setAgentStatus(agentId, "idle");
+              await handleSend(
+                `[输出被截断 ${round}/${maxAutoContinueRef.current}] 你的回复超出了 token 限制被截断了。\n原始任务: ${originalUserMsg}\n请从断点继续，每次只输出 1 个代码块。`,
+                true,
+              );
+              return;
+            }
+
             if (shouldAutoExecute && codeBlocks.length > 0) {
               setApplyingMsgId(assistantMsgId);
+              const execResults: string[] = [];
+              let execFailed = false;
               for (let _bi = 0; _bi < codeBlocks.length; _bi++) {
                 const block = codeBlocks[_bi];
                 try {
                   const { result, diff } = await executeCode(
                     block.code,
                     agentId,
+                  );
+                  execResults.push(
+                    `[OK] ${result || "执行成功"}` +
+                      (diff?.changeCount
+                        ? ` (修改了 ${diff.changeCount} 个单元格)`
+                        : ""),
                   );
                   updateAgentMessages(agentId, (prev) =>
                     prev.map((m) => {
@@ -657,6 +827,8 @@ ${code}
                 } catch (err) {
                   const errorMsg =
                     err instanceof Error ? err.message : String(err);
+                  execResults.push(`[ERR] 执行失败: ${errorMsg}`);
+                  execFailed = true;
                   updateAgentMessages(agentId, (prev) =>
                     prev.map((m) => {
                       if (m.id !== assistantMsgId) return m;
@@ -668,11 +840,72 @@ ${code}
                       return { ...m, codeBlocks: updated };
                     }),
                   );
-                  setAgentStatus(agentId, "failed", errorMsg);
                   break;
                 }
               }
               setApplyingMsgId(null);
+
+              if (
+                !execFailed &&
+                !aborted &&
+                autoContinueRoundRef.current < maxAutoContinueRef.current
+              ) {
+                autoContinueRoundRef.current++;
+                const round = autoContinueRoundRef.current;
+                const maxRound = maxAutoContinueRef.current;
+                const originalUserMsg =
+                  messagesRef.current.find(
+                    (m) => m.role === "user" && !m.isAutoContinue,
+                  )?.content || "";
+                let sheetList = wpsCtx?.sheetNames?.join(", ") || "";
+                try {
+                  const freshCtx = await getWpsContext();
+                  if (freshCtx?.sheetNames?.length) {
+                    sheetList = freshCtx.sheetNames.join(", ");
+                  }
+                } catch {}
+                // #region agent log
+                fetch(
+                  "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-Debug-Session-Id": "716a17",
+                    },
+                    body: JSON.stringify({
+                      sessionId: "716a17",
+                      location: "App.tsx:autoContinue",
+                      message: "auto-continue decision",
+                      data: {
+                        round,
+                        maxRound,
+                        execResults,
+                        originalUserMsg,
+                        sheetList,
+                      },
+                      timestamp: Date.now(),
+                      hypothesisId: "H1",
+                    }),
+                  },
+                ).catch(() => {});
+                // #endregion
+                const contText =
+                  `[执行结果 ${round}/${maxRound}]\n${execResults.join("\n")}\n\n` +
+                  `原始任务: ${originalUserMsg}\n` +
+                  (sheetList ? `当前工作簿的 Sheet: ${sheetList}\n` : "") +
+                  `上一步已成功执行。请判断原始任务是否已经完成：\n` +
+                  `- 如果任务已完成，直接给出简短总结（不要输出代码块）\n` +
+                  `- 如果还有必要的后续步骤，继续下一步（输出 1 个代码块）\n` +
+                  `引用 Sheet 时必须使用上面列出的准确表名。`;
+                setAgentStatus(agentId, "idle");
+                await handleSend(contText, true);
+                return;
+              }
+              if (execFailed) {
+                setAgentStatus(agentId, "failed");
+                return;
+              }
             }
             setAgentStatus(agentId, "done");
           },
@@ -970,13 +1203,17 @@ ${code}
   const inputBoxHeightRef = useRef(inputBoxHeight);
   inputBoxHeightRef.current = inputBoxHeight;
 
+  const chatColumnRef = useRef<HTMLDivElement>(null);
+
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragStartRef.current = { y: e.clientY, h: inputBoxHeightRef.current };
     const onMove = (ev: MouseEvent) => {
       if (!dragStartRef.current) return;
       const delta = dragStartRef.current.y - ev.clientY;
-      const next = Math.max(80, Math.min(400, dragStartRef.current.h + delta));
+      const colH = chatColumnRef.current?.clientHeight ?? 600;
+      const maxH = Math.min(400, colH * 0.45);
+      const next = Math.max(80, Math.min(maxH, dragStartRef.current.h + delta));
       setInputBoxHeight(next);
     };
     const onUp = () => {
@@ -1044,7 +1281,7 @@ ${code}
           />
         )}
 
-        <div className={styles.chatColumn}>
+        <div className={styles.chatColumn} ref={chatColumnRef}>
           {/* Tab 栏 — 仅在侧边栏收起时显示 */}
           {!agentListOpen && (
             <AgentTabBar
@@ -1061,7 +1298,8 @@ ${code}
               <TableIcon />
               <span className={styles.ctxText}>
                 {wpsCtx.selection.sheetName}!{wpsCtx.selection.address}（
-                {wpsCtx.selection.rowCount} 行 × {wpsCtx.selection.colCount} 列）
+                {wpsCtx.selection.rowCount} 行 × {wpsCtx.selection.colCount}{" "}
+                列）
               </span>
               <button
                 className={styles.ctxPinBtn}
@@ -1093,6 +1331,8 @@ ${code}
                 onRetryFix={handleRetryFix}
                 isApplying={applyingMsgId === msg.id}
                 onSwitchToAgent={handleSwitchToAgent}
+                onPlanStepsChange={handlePlanStepsChange}
+                onConfirmPlan={handleConfirmPlan}
               />
             ))}
             <div ref={bottomRef} />
@@ -1100,133 +1340,141 @@ ${code}
 
           {/* 输入区 */}
           <div className={styles.inputArea}>
-        {/* 智能快捷卡片 - 水平滚动行 */}
-        <QuickActionCards
-          hasSelection={!!wpsCtx?.selection}
-          onAction={handleQuickAction}
-          disabled={loading}
-          mode={currentMode}
-        />
-
-        <div className={styles.inputBox} style={{ height: inputBoxHeight }}>
-          {/* 拖拽手柄 */}
-          <div className={styles.dragHandle} onMouseDown={handleDragStart}>
-            <div className={styles.dragDots} />
-          </div>
-
-          {/* 输入主体 */}
-          <div className={styles.inputBody}>
-            {/* inline chips */}
-            <div className={styles.inputChips}>
-              {pinnedSelection && (
-                <span className={styles.inlineChip}>
-                  <TableIcon />
-                  <span className={styles.chipLabel}>
-                    {pinnedSelection.label}（{pinnedSelection.rowCount}×
-                    {pinnedSelection.colCount}）
-                  </span>
-                  <button
-                    className={styles.chipRemove}
-                    onClick={() => setPinnedSelection(null)}
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-              {attachedFiles.map((f) => (
-                <span
-                  key={f.name}
-                  className={`${styles.inlineChip} ${f.type === "table" ? styles.chipTable : ""} ${f.type === "image" ? styles.chipImage : ""}`}
-                >
-                  {f.type === "image" ? (
-                    f.previewUrl ? (
-                      <img
-                        src={f.previewUrl}
-                        alt={f.name}
-                        className={styles.chipThumb}
-                      />
-                    ) : (
-                      <ImageIcon />
-                    )
-                  ) : f.type === "table" ? (
-                    <TableIcon />
-                  ) : (
-                    <span className={styles.chipFileIcon}>📎</span>
-                  )}
-                  <span className={styles.chipLabel}>{f.name}</span>
-                  <button
-                    className={styles.chipRemove}
-                    onClick={() => handleRemoveFile(f.name)}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-
-            {/* 文本输入 */}
-            <textarea
-              ref={textareaRef}
-              className={styles.inlineTextarea}
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder={
-                pinnedSelection || attachedFiles.length > 0
-                  ? "描述你想做什么..."
-                  : "发个指令...（Enter 发送，Shift+Enter 换行）"
-              }
-              rows={1}
+            {/* 智能快捷卡片 - 水平滚动行 */}
+            <QuickActionCards
+              hasSelection={!!wpsCtx?.selection}
+              onAction={handleQuickAction}
               disabled={loading}
+              mode={currentMode}
             />
-          </div>
 
-          {/* 底部工具栏 */}
-          <div className={styles.inputToolbar}>
-            <div className={styles.toolbarLeft}>
-              <AttachmentMenu
-                onFileAttach={handleFileAttach}
-                webSearchEnabled={webSearchEnabled}
-                onToggleWebSearch={handleToggleWebSearch}
-                disabled={loading}
-              />
-              <ModeSelector
-                mode={currentMode}
-                onChange={handleModeChange}
-                disabled={loading}
-              />
-            </div>
-            <div className={styles.toolbarRight}>
-              <ModelSelector
-                value={selectedModel}
-                onChange={setActiveModel}
-                disabled={loading}
-              />
-              {loading ? (
-                <button
-                  className={`${styles.sendBtn} ${styles.stopBtn}`}
-                  onClick={handleStop}
-                  title="停止生成"
-                >
-                  <StopIcon />
-                </button>
-              ) : (
-                <button
-                  className={styles.sendBtn}
-                  onClick={handleSendClick}
-                  disabled={!input.trim()}
-                  title="发送"
-                >
-                  <SendIcon />
-                </button>
-              )}
+            <div className={styles.inputBox} style={{ height: inputBoxHeight }}>
+              {/* 拖拽手柄 */}
+              <div className={styles.dragHandle} onMouseDown={handleDragStart}>
+                <div className={styles.dragDots} />
+              </div>
+
+              {/* 输入主体 */}
+              <div className={styles.inputBody}>
+                {/* inline chips */}
+                <div className={styles.inputChips}>
+                  {pinnedSelection && !selectionDismissed && (
+                    <span
+                      className={`${styles.inlineChip} ${styles.chipSelection}`}
+                      title={`引用: ${pinnedSelection.label}`}
+                    >
+                      <TableIcon />
+                      <span className={styles.chipLabel}>
+                        {pinnedSelection.label}（{pinnedSelection.rowCount}行 ×{" "}
+                        {pinnedSelection.colCount}列）
+                      </span>
+                      <span className={styles.chipBadge}>
+                        {isWpsAvailable() ? "引用" : "mock"}
+                      </span>
+                      <button
+                        className={styles.chipRemove}
+                        onClick={handleDismissSelection}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )}
+                  {attachedFiles.map((f) => (
+                    <span
+                      key={f.name}
+                      className={`${styles.inlineChip} ${f.type === "table" ? styles.chipTable : ""} ${f.type === "image" ? styles.chipImage : ""}`}
+                    >
+                      {f.type === "image" ? (
+                        f.previewUrl ? (
+                          <img
+                            src={f.previewUrl}
+                            alt={f.name}
+                            className={styles.chipThumb}
+                          />
+                        ) : (
+                          <ImageIcon />
+                        )
+                      ) : f.type === "table" ? (
+                        <TableIcon />
+                      ) : (
+                        <span className={styles.chipFileIcon}>📎</span>
+                      )}
+                      <span className={styles.chipLabel}>{f.name}</span>
+                      <button
+                        className={styles.chipRemove}
+                        onClick={() => handleRemoveFile(f.name)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                {/* 文本输入 */}
+                <textarea
+                  ref={textareaRef}
+                  className={styles.inlineTextarea}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  placeholder={
+                    pinnedSelection || attachedFiles.length > 0
+                      ? "描述你想做什么..."
+                      : "发个指令...（Enter 发送，Shift+Enter 换行）"
+                  }
+                  rows={1}
+                  disabled={loading}
+                />
+              </div>
+
+              {/* 底部工具栏 */}
+              <div className={styles.inputToolbar}>
+                <div className={styles.toolbarLeft}>
+                  <AttachmentMenu
+                    onFileAttach={handleFileAttach}
+                    webSearchEnabled={webSearchEnabled}
+                    onToggleWebSearch={handleToggleWebSearch}
+                    disabled={loading}
+                  />
+                  <ModeSelector
+                    mode={currentMode}
+                    onChange={handleModeChange}
+                    disabled={loading}
+                  />
+                </div>
+                <div className={styles.toolbarRight}>
+                  <ModelSelector
+                    value={selectedModel}
+                    onChange={setActiveModel}
+                    disabled={loading}
+                  />
+                  {loading ? (
+                    <button
+                      className={`${styles.sendBtn} ${styles.stopBtn}`}
+                      onClick={handleStop}
+                      title="停止生成"
+                    >
+                      <StopIcon />
+                    </button>
+                  ) : (
+                    <button
+                      className={styles.sendBtn}
+                      onClick={handleSendClick}
+                      disabled={!input.trim()}
+                      title="发送"
+                    >
+                      <SendIcon />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-          </div>
-        </div>{/* end chatColumn */}
-      </div>{/* end mainBody */}
+        {/* end chatColumn */}
+      </div>
+      {/* end mainBody */}
 
       <HistoryPanel
         visible={historyOpen}
@@ -1247,13 +1495,23 @@ ${code}
           setApplyingMsgId(null);
         }}
       />
+      <UpdateNotification />
     </div>
   );
 }
 
 function SidebarToggleIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="9" y1="3" x2="9" y2="21" />
     </svg>
@@ -1262,7 +1520,16 @@ function SidebarToggleIcon() {
 
 function AddIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
     </svg>

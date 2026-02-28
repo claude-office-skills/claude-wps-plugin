@@ -24,7 +24,16 @@ const COLLAPSED_LIMIT = 5;
 
 function SearchIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
@@ -76,9 +85,8 @@ function AgentListPanel({
   }, [agents, search]);
 
   const needsMore = filtered.length > COLLAPSED_LIMIT && !search.trim();
-  const visibleAgents = needsMore && !showAll
-    ? filtered.slice(0, COLLAPSED_LIMIT)
-    : filtered;
+  const visibleAgents =
+    needsMore && !showAll ? filtered.slice(0, COLLAPSED_LIMIT) : filtered;
   const hiddenCount = filtered.length - COLLAPSED_LIMIT;
 
   useEffect(() => {
@@ -103,7 +111,11 @@ function AgentListPanel({
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <button className={styles.newAgentBtn} onClick={onNew} title="New Agent">
+        <button
+          className={styles.newAgentBtn}
+          onClick={onNew}
+          title="New Agent"
+        >
           New Agent
         </button>
       </div>
@@ -142,7 +154,9 @@ function AgentListPanel({
                   {agentPreview(agent)}
                 </span>
               </div>
-              <span className={styles.itemTime}>{timeAgo(agent.updatedAt)}</span>
+              <span className={styles.itemTime}>
+                {timeAgo(agent.updatedAt)}
+              </span>
               {agents.length > 1 && (
                 <button
                   className={styles.removeBtn}
@@ -161,20 +175,14 @@ function AgentListPanel({
 
         {/* ...More 折叠按钮 */}
         {needsMore && !showAll && (
-          <button
-            className={styles.moreBtn}
-            onClick={() => setShowAll(true)}
-          >
-            ...More ({hiddenCount})
+          <button className={styles.moreBtn} onClick={() => setShowAll(true)}>
+            ... More ({hiddenCount})
           </button>
         )}
 
         {/* 展开后可收起 */}
         {needsMore && showAll && (
-          <button
-            className={styles.moreBtn}
-            onClick={() => setShowAll(false)}
-          >
+          <button className={styles.moreBtn} onClick={() => setShowAll(false)}>
             Show Less
           </button>
         )}

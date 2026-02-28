@@ -1,0 +1,188 @@
+.wrapper {
+  border: 1px solid var(--border-color, #333);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 8px 0;
+  background: var(--bg-secondary, #1a1a1a);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.icon {
+  font-size: 16px;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #eee);
+  flex: 1;
+}
+
+.progress {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  background: var(--bg-tertiary, #252525);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.stepList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stepRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.stepRow:hover {
+  background: var(--bg-hover, #222);
+}
+
+.stepDone {
+  opacity: 0.55;
+}
+
+.stepDone .stepText {
+  text-decoration: line-through;
+}
+
+.checkbox {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-color, #555);
+  background: transparent;
+  color: var(--text-secondary, #888);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.stepDone .checkbox {
+  background: var(--accent-green, #10b981);
+  border-color: var(--accent-green, #10b981);
+  color: #fff;
+}
+
+.stepText {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-primary, #ddd);
+  cursor: default;
+  line-height: 1.4;
+}
+
+.editRow {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.editInput {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--accent-color, #6366f1);
+  background: var(--bg-primary, #111);
+  color: var(--text-primary, #eee);
+  font-size: 12px;
+  outline: none;
+}
+
+.editBtn {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+}
+
+.editBtn:hover {
+  color: var(--text-primary, #eee);
+}
+
+.stepActions {
+  display: none;
+  gap: 2px;
+}
+
+.stepRow:hover .stepActions {
+  display: flex;
+}
+
+.miniBtn {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.miniBtn:hover {
+  color: var(--text-primary, #eee);
+  background: var(--bg-tertiary, #333);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.addBtn {
+  background: none;
+  border: 1px dashed var(--border-color, #444);
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.addBtn:hover {
+  color: var(--text-primary, #eee);
+  border-color: var(--text-secondary, #888);
+}
+
+.confirmBtn {
+  background: var(--accent-color, #6366f1);
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.confirmBtn:hover {
+  opacity: 0.85;
+}

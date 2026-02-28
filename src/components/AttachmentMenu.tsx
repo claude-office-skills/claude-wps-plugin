@@ -152,7 +152,7 @@ const AttachmentMenu = memo(function AttachmentMenu({
             className={`${styles.menuItem} ${styles.menuItemDisabled}`}
             disabled
           >
-            <span className={styles.menuIcon}>⚡</span>
+            <span className={styles.menuIcon}>◇</span>
             <span className={styles.menuLabel}>连接器</span>
             <span className={styles.menuSoon}>Coming soon</span>
           </button>

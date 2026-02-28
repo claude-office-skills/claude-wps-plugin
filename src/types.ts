@@ -22,6 +22,20 @@ export interface ModeDefinition {
   quickActions?: QuickAction[];
 }
 
+export interface PlanStep {
+  index: number;
+  text: string;
+  done: boolean;
+}
+
+export interface Provenance {
+  mode?: string;
+  model?: string;
+  skillsLoaded?: string[];
+  promptSummary?: string;
+  timestamp?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -33,6 +47,9 @@ export interface ChatMessage {
   thinkingMs?: number;
   thinkingContent?: string;
   suggestAgentSwitch?: boolean;
+  planSteps?: PlanStep[];
+  provenance?: Provenance;
+  isAutoContinue?: boolean;
 }
 
 export interface CodeBlock {

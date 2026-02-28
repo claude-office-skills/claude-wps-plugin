@@ -12,7 +12,12 @@ import type { DiffResult } from "../types";
 
 interface Props {
   block: CodeBlockType;
-  onExecuted: (blockId: string, result: string, error?: string, diff?: DiffResult | null) => void;
+  onExecuted: (
+    blockId: string,
+    result: string,
+    error?: string,
+    diff?: DiffResult | null,
+  ) => void;
   onRetryFix?: (code: string, error: string, language: string) => void;
   isStreaming?: boolean;
 }
@@ -49,24 +54,86 @@ export default function CodeBlock({
   const handleRun = async () => {
     setRunning(true);
     // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc5e63'},body:JSON.stringify({sessionId:'fc5e63',location:'CodeBlock.tsx:handleRun',message:'Manual execute clicked',data:{blockId:block.id,lang:block.language,codeLen:block.code.length,first120:block.code.slice(0,120),hasImport:/\bimport\b/.test(block.code),hasExport:/\bexport\b/.test(block.code),hasArrow:/=>/.test(block.code),hasConst:/\bconst\b/.test(block.code),hasLet:/\blet\b/.test(block.code)},timestamp:Date.now(),hypothesisId:'H'})}).catch(()=>{});
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "fc5e63",
+      },
+      body: JSON.stringify({
+        sessionId: "fc5e63",
+        location: "CodeBlock.tsx:handleRun",
+        message: "Manual execute clicked",
+        data: {
+          blockId: block.id,
+          lang: block.language,
+          codeLen: block.code.length,
+          first120: block.code.slice(0, 120),
+          hasImport: /\bimport\b/.test(block.code),
+          hasExport: /\bexport\b/.test(block.code),
+          hasArrow: /=>/.test(block.code),
+          hasConst: /\bconst\b/.test(block.code),
+          hasLet: /\blet\b/.test(block.code),
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H",
+      }),
+    }).catch(() => {});
     // #endregion
     try {
       const { result, diff } = await executeCode(block.code);
       // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc5e63'},body:JSON.stringify({sessionId:'fc5e63',location:'CodeBlock.tsx:handleRun:success',message:'Execution succeeded',data:{blockId:block.id,resultLen:result?.length,diffChanges:diff?.changeCount},timestamp:Date.now(),hypothesisId:'H'})}).catch(()=>{});
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "fc5e63",
+          },
+          body: JSON.stringify({
+            sessionId: "fc5e63",
+            location: "CodeBlock.tsx:handleRun:success",
+            message: "Execution succeeded",
+            data: {
+              blockId: block.id,
+              resultLen: result?.length,
+              diffChanges: diff?.changeCount,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H",
+          }),
+        },
+      ).catch(() => {});
       // #endregion
       onExecuted(block.id, result, undefined, diff);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc5e63'},body:JSON.stringify({sessionId:'fc5e63',location:'CodeBlock.tsx:handleRun:error',message:'Execution failed',data:{blockId:block.id,error:errMsg,codeFirst200:block.code.slice(0,200)},timestamp:Date.now(),hypothesisId:'H'})}).catch(()=>{});
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "fc5e63",
+          },
+          body: JSON.stringify({
+            sessionId: "fc5e63",
+            location: "CodeBlock.tsx:handleRun:error",
+            message: "Execution failed",
+            data: {
+              blockId: block.id,
+              error: errMsg,
+              codeFirst200: block.code.slice(0, 200),
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H",
+          }),
+        },
+      ).catch(() => {});
       // #endregion
-      onExecuted(
-        block.id,
-        "",
-        errMsg,
-      );
+      onExecuted(block.id, "", errMsg);
     } finally {
       setRunning(false);
     }
@@ -97,8 +164,11 @@ export default function CodeBlock({
       : "已执行"
     : null;
 
+  const wrapperCls = `${styles.wrapper}${running ? ` ${styles.wrapperRunning}` : ""}`;
+
   return (
-    <div className={styles.wrapper}>
+    <div className={wrapperCls}>
+      {running && <div className={styles.execPulse} />}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
           {lineCount > COLLAPSE_THRESHOLD && (

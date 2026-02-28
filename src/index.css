@@ -22,25 +22,29 @@
   --border-subtle:  rgba(58, 58, 58, 0.5);
   --border-input:   rgba(58, 58, 58, 0.19);
 
-  /* 品牌色（不随主题变化） */
+  /* 品牌色 — Claude 橙（按钮/交互） */
   --accent:          #D97757;
   --accent-hover:    #c4603e;
   --accent-bg:       rgba(217, 119, 87, 0.12);
   --accent-border:   rgba(217, 119, 87, 0.25);
   --accent-border-lg: rgba(217, 119, 87, 0.40);
-  --success:         #00d4aa;
-  --success-bg:      rgba(0, 212, 170, 0.12);
-  --error:           #ef4444;
-  --error-bg:        rgba(239, 68, 68, 0.1);
-  --error-border:    rgba(239, 68, 68, 0.3);
+  /* 信息色 — 钢蓝（状态标签/徽章/非交互元素） */
+  --ui-accent:       #7B8EC8;
+  --ui-accent-bg:    rgba(123, 142, 200, 0.12);
+  --ui-accent-border: rgba(123, 142, 200, 0.25);
+  --success:         #8BA88B;
+  --success-bg:      rgba(139, 168, 139, 0.12);
+  --error:           #C87B7B;
+  --error-bg:        rgba(200, 123, 123, 0.1);
+  --error-border:    rgba(200, 123, 123, 0.3);
 
-  /* 代码块 */
-  --code-bg:     #1a1a2e;
-  --code-header: #16162a;
-  --code-border: #2a2a3e;
-  --code-text:   #e8e8e8;
-  --code-dim:    #555570;
-  --code-result: #0f0f1a;
+  /* 代码块 — Cursor 风格弱化 */
+  --code-bg:     #1a1a1a;
+  --code-header: #1a1a1a;
+  --code-border: #2a2a2a;
+  --code-text:   #b0b0b0;
+  --code-dim:    #555555;
+  --code-result: #1a1a1a;
 
   /* 特殊 */
   --scrollbar-track: transparent;
@@ -50,10 +54,10 @@
   --overlay:         rgba(0, 0, 0, 0.5);
   --thinking-bg:     #141414;
   --thinking-border: #333333;
-  --diff-bg:         rgba(99, 179, 237, 0.06);
-  --diff-header-bg:  rgba(99, 179, 237, 0.10);
-  --diff-border:     rgba(99, 179, 237, 0.30);
-  --diff-color:      #63b3ed;
+  --diff-bg:         #1a1a1a;
+  --diff-header-bg:  #1a1a1a;
+  --diff-border:     #2a2a2a;
+  --diff-color:      #888888;
 }
 
 /* ── 浅色主题覆盖 ── */
@@ -93,10 +97,10 @@
   --overlay:         rgba(0, 0, 0, 0.3);
   --thinking-bg:     #f5f5f5;
   --thinking-border: #e0e0e0;
-  --diff-bg:         rgba(99, 179, 237, 0.05);
-  --diff-header-bg:  rgba(99, 179, 237, 0.08);
-  --diff-border:     rgba(99, 179, 237, 0.25);
-  --diff-color:      #3182ce;
+  --diff-bg:         #f5f5f5;
+  --diff-header-bg:  #f0f0f0;
+  --diff-border:     #e0e0e0;
+  --diff-color:      #666666;
 }
 
 *, *::before, *::after {

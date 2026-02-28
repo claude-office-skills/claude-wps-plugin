@@ -26,9 +26,9 @@ interface ModeDef {
 }
 
 const FALLBACK_GENERAL: QuickAction[] = [
-  { icon: "⚡", label: "操作表格", prompt: "帮我对当前表格执行操作" },
-  { icon: "📊", label: "建立模型", prompt: "帮我基于当前数据建立分析模型" },
-  { icon: "📝", label: "解读工作簿", prompt: "解读当前工作簿的内容和结构" },
+  { icon: "→", label: "操作表格", prompt: "帮我对当前表格执行操作" },
+  { icon: "◆", label: "建立模型", prompt: "帮我基于当前数据建立分析模型" },
+  { icon: "≡", label: "解读工作簿", prompt: "解读当前工作簿的内容和结构" },
   {
     icon: "🧹",
     label: "清洗数据",

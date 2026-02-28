@@ -1,26 +1,66 @@
-/* ── 消息行布局 ── */
+/* ── Cursor-like 全宽流式布局 ── */
 
-.rowUser {
+.msgRow {
   display: flex;
-  justify-content: flex-end;
-  padding: 2px 0;
+  flex-direction: column;
+  padding: 10px 0 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  min-width: 0;
 }
 
-.rowAssist {
+/* ── 用户消息区域框（Cursor 风格）── */
+
+.userBox {
+  background: var(--bg-elevated, #2a2a2a);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+/* ── 自动续接（代码块风格弱化线框）── */
+
+.autoContinueBubble {
   display: flex;
-  justify-content: flex-start;
-  padding: 2px 0;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--code-bg, #1a1a1a);
+  border: 1px solid var(--code-border, #2a2a2a);
+  max-height: calc(11px * 1.4 * 5 + 20px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.autoContinueIcon {
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--code-dim, #555);
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.autoContinueText {
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--code-dim, #555);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.autoContinueBubble::-webkit-scrollbar {
+  width: 4px;
+}
+
+.autoContinueBubble::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.autoContinueBubble::-webkit-scrollbar-thumb {
+  background: var(--code-border, #2a2a2a);
+  border-radius: 2px;
 }
 
 /* ── 用户消息 ── */
-
-.userBubble {
-  max-width: 85%;
-  padding: 8px 14px;
-  border-radius: 18px 18px 4px 18px;
-  background: var(--accent);
-  color: #fff;
-}
 
 .userText {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -29,6 +69,7 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  color: var(--text-primary, #fff);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -38,7 +79,7 @@
 .assistBubble {
   max-width: 100%;
   width: 100%;
-  padding: 12px 0 0;
+  overflow: hidden;
 }
 
 .assistContent {
@@ -47,6 +88,7 @@
   color: var(--text-secondary);
   line-height: 1.65;
   word-break: break-word;
+  min-width: 0;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -208,6 +250,29 @@
   font-size: 13px;
   color: var(--text-muted);
   font-weight: 500;
+  position: relative;
+  overflow: hidden;
+}
+
+.thinkingLabel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(99, 102, 241, 0.3),
+    transparent
+  );
+  animation: sweepLight 2s ease-in-out infinite;
+}
+
+@keyframes sweepLight {
+  0% { left: -50%; }
+  100% { left: 150%; }
 }
 
 .thinkingTimer {
@@ -429,4 +494,18 @@
 
 .modeSwitchBtn:active {
   transform: translateY(0);
+}
+
+/* ── 结果溯源标注 ── */
+
+.provenanceBar {
+  padding: 4px 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+.provenanceLabel {
+  font-size: 10px;
+  color: var(--text-tertiary, #555);
+  font-family: monospace;
 }

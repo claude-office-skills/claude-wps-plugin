@@ -4,12 +4,14 @@ import {
   useRef,
   memo,
   useMemo,
+  useCallback,
   type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, PlanStep } from "../types";
 import CodeBlock from "./CodeBlock";
+import PlanEditor from "./PlanEditor";
 import styles from "./MessageBubble.module.css";
 
 interface Props {
@@ -25,6 +27,8 @@ interface Props {
   onRetryFix?: (code: string, error: string, language: string) => void;
   isApplying?: boolean;
   onSwitchToAgent?: () => void;
+  onPlanStepsChange?: (msgId: string, steps: PlanStep[]) => void;
+  onConfirmPlan?: (msgId: string, steps: PlanStep[]) => void;
 }
 
 function ThinkingSection({
@@ -210,9 +214,20 @@ function MessageBubble({
   onRetryFix,
   isApplying,
   onSwitchToAgent,
+  onPlanStepsChange,
+  onConfirmPlan,
 }: Props) {
   const isUser = message.role === "user";
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+
+  const handlePlanStepsChange = useCallback(
+    (steps: PlanStep[]) => onPlanStepsChange?.(message.id, steps),
+    [message.id, onPlanStepsChange],
+  );
+  const handleConfirmPlan = useCallback(
+    (steps: PlanStep[]) => onConfirmPlan?.(message.id, steps),
+    [message.id, onConfirmPlan],
+  );
 
   const codeBlocks = message.codeBlocks ?? [];
   const hasUnexecutedCode =
@@ -247,9 +262,20 @@ function MessageBubble({
   };
 
   if (isUser) {
+    if (message.isAutoContinue) {
+      const lines = message.content.split("\n").slice(0, 5);
+      return (
+        <div className={styles.msgRow}>
+          <div className={styles.autoContinueBubble}>
+            <span className={styles.autoContinueIcon}>▸</span>
+            <span className={styles.autoContinueText}>{lines.join("\n")}</span>
+          </div>
+        </div>
+      );
+    }
     return (
-      <div className={styles.rowUser}>
-        <div className={styles.userBubble}>
+      <div className={styles.msgRow}>
+        <div className={styles.userBox}>
           <p className={styles.userText}>{message.content}</p>
         </div>
       </div>
@@ -261,9 +287,8 @@ function MessageBubble({
   const isDone = !message.isStreaming;
 
   return (
-    <div className={styles.rowAssist}>
+    <div className={styles.msgRow}>
       <div className={styles.assistBubble}>
-        {/* Thinking section — always shown during thinking, collapsible after */}
         <ThinkingSection
           isThinking={isThinking}
           thinkingMs={message.thinkingMs}
@@ -296,6 +321,16 @@ function MessageBubble({
           </div>
         )}
 
+        {message.planSteps &&
+          message.planSteps.length > 0 &&
+          !message.isStreaming && (
+            <PlanEditor
+              steps={message.planSteps}
+              onStepsChange={handlePlanStepsChange}
+              onConfirmPlan={handleConfirmPlan}
+            />
+          )}
+
         {codeBlocks.length > 0 && !message.isStreaming && (
           <div className={styles.applyBar}>
             {hasUnexecutedCode ? (
@@ -322,9 +357,19 @@ function MessageBubble({
           </div>
         )}
 
+        {message.provenance &&
+          !message.isStreaming &&
+          (message.provenance.skillsLoaded?.length ?? 0) > 0 && (
+            <div className={styles.provenanceBar}>
+              <span className={styles.provenanceLabel}>
+                {message.provenance.skillsLoaded!.join(", ")}
+              </span>
+            </div>
+          )}
+
         {message.suggestAgentSwitch && onSwitchToAgent && (
           <div className={styles.modeSwitchBanner}>
-            <span className={styles.modeSwitchIcon}>⚡</span>
+            <span className={styles.modeSwitchIcon}>→</span>
             <span className={styles.modeSwitchText}>
               该操作需要在 Agent 模式下执行
             </span>
@@ -467,6 +512,8 @@ export default memo(MessageBubble, (prev, next) => {
     prev.onCodeExecuted === next.onCodeExecuted &&
     prev.onApplyCode === next.onApplyCode &&
     prev.onRetryFix === next.onRetryFix &&
-    prev.onSwitchToAgent === next.onSwitchToAgent
+    prev.onSwitchToAgent === next.onSwitchToAgent &&
+    prev.onPlanStepsChange === next.onPlanStepsChange &&
+    prev.onConfirmPlan === next.onConfirmPlan
   );
 });

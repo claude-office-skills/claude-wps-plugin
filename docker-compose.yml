@@ -1,0 +1,52 @@
+services:
+  proxy:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./skills:/app/skills:ro
+      - ./commands:/app/commands:ro
+      - ./.chat-history:/app/.chat-history
+    environment:
+      - NODE_ENV=development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  test-unit:
+    build: .
+    command: npx vitest run
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./src:/app/src:ro
+    profiles:
+      - test
+
+  test-api:
+    build: .
+    command: npx playwright test --project=api
+    depends_on:
+      proxy:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://proxy:3001
+    volumes:
+      - ./tests:/app/tests:ro
+    profiles:
+      - test
+
+  test-e2e:
+    build: .
+    command: npx playwright test --project=e2e-chromium
+    depends_on:
+      proxy:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://proxy:3001
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./test-results:/app/test-results
+    profiles:
+      - test

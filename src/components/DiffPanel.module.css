@@ -1,27 +1,32 @@
 .wrapper {
   margin: 6px 0;
   border: 1px solid var(--diff-border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--diff-bg);
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   background: var(--diff-header-bg);
   border-bottom: 1px solid var(--diff-border);
 }
 
 .icon {
-  font-size: 14px;
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 .title {
-  font-weight: 600;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-weight: 500;
+  font-size: 11px;
   color: var(--diff-color);
 }
 
@@ -31,8 +36,42 @@
   font-size: 11px;
 }
 
+.sheetLink {
+  margin-left: auto;
+  color: var(--diff-color, #888);
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.sheetLink:hover {
+  background: rgba(255, 255, 255, 0.05);
+  text-decoration: underline;
+}
+
 .table {
   padding: 4px 0;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.table::-webkit-scrollbar {
+  width: 4px;
+}
+
+.table::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table::-webkit-scrollbar-thumb {
+  background: var(--diff-border);
+  border-radius: 2px;
 }
 
 .tableHeader {
@@ -66,6 +105,24 @@
   font-weight: 500;
 }
 
+.cellLink {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--diff-color, #888);
+  padding: 0;
+  text-align: left;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.cellLink:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
 .colBefore,
 .colAfter {
   font-size: 11px;
@@ -77,24 +134,25 @@
 }
 
 .removed {
-  color: #fc8181;
-  background: rgba(252, 129, 129, 0.1);
+  color: #997070;
+  background: rgba(153, 112, 112, 0.08);
   text-decoration: line-through;
 }
 
 .added {
-  color: #68d391;
-  background: rgba(104, 211, 145, 0.1);
+  color: #6b9b6b;
+  background: rgba(107, 155, 107, 0.08);
 }
 
 .toggleBtn {
   display: block;
   width: 100%;
-  padding: 6px;
+  padding: 5px;
   border: none;
   background: var(--diff-header-bg);
   color: var(--diff-color);
-  font-size: 11px;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 10px;
   cursor: pointer;
   transition: background 0.15s;
   border-top: 1px solid var(--diff-border);
@@ -102,5 +160,5 @@
 
 .toggleBtn:hover {
   background: var(--diff-bg);
-  filter: brightness(1.3);
+  filter: brightness(1.15);
 }

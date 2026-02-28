@@ -56,7 +56,11 @@ function buildContextString(wpsCtx: WpsContext): string {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onThinking?: (text: string) => void;
-  onComplete: (fullText: string) => void;
+  onComplete: (
+    fullText: string,
+    provenance?: Record<string, unknown>,
+    flags?: { tokenLimitHit?: boolean },
+  ) => void;
   onError: (err: Error) => void;
   onModeInfo?: (mode: string, enforcement: Record<string, unknown>) => void;
 }
@@ -90,6 +94,7 @@ function processSseLines(
   buffer: string,
   fullTextRef: { v: string },
   callbacks: StreamCallbacks,
+  provenanceRef?: { v: Record<string, unknown> | undefined },
 ): string {
   const lines = buffer.split("\n");
   const tail = lines.pop() ?? "";
@@ -102,6 +107,9 @@ function processSseLines(
       const event = JSON.parse(data);
       if (event.type === "mode") {
         callbacks.onModeInfo?.(event.mode, event.enforcement);
+        if (event.provenance && provenanceRef) {
+          provenanceRef.v = event.provenance;
+        }
       } else if (event.type === "token") {
         fullTextRef.v += event.text;
         callbacks.onToken(event.text);
@@ -109,6 +117,17 @@ function processSseLines(
         callbacks.onThinking?.(event.text);
       } else if (event.type === "done") {
         if (event.fullText && !fullTextRef.v) fullTextRef.v = event.fullText;
+        if (event.provenance && provenanceRef) {
+          provenanceRef.v = event.provenance;
+        }
+        if (event.tokenLimitHit && provenanceRef) {
+          (
+            provenanceRef as {
+              v: Record<string, unknown> | undefined;
+              tokenLimitHit?: boolean;
+            }
+          ).tokenLimitHit = true;
+        }
       } else if (event.type === "error") {
         throw new Error(event.message);
       }
@@ -156,6 +175,9 @@ export async function sendMessage(
   }
 
   const fullTextRef = { v: "" };
+  const provenanceRef: { v: Record<string, unknown> | undefined } = {
+    v: undefined,
+  };
   let prevLen = 0;
 
   return new Promise<void>((resolve, reject) => {
@@ -181,7 +203,7 @@ export async function sendMessage(
       buffer += newData;
 
       try {
-        buffer = processSseLines(buffer, fullTextRef, callbacks);
+        buffer = processSseLines(buffer, fullTextRef, callbacks, provenanceRef);
       } catch (err) {
         aborted = true;
         xhr.abort();
@@ -199,20 +221,24 @@ export async function sendMessage(
       if (remaining) {
         buffer += remaining;
         try {
-          processSseLines(buffer, fullTextRef, callbacks);
+          processSseLines(buffer, fullTextRef, callbacks, provenanceRef);
         } catch (err) {
           reject(err instanceof Error ? err : new Error(String(err)));
           return;
         }
       }
-      callbacks.onComplete(fullTextRef.v);
+      const _flags: { tokenLimitHit?: boolean } = {};
+      if ((provenanceRef as { tokenLimitHit?: boolean })?.tokenLimitHit) {
+        _flags.tokenLimitHit = true;
+      }
+      callbacks.onComplete(fullTextRef.v, provenanceRef.v, _flags);
       resolve();
     };
 
     xhr.onerror = () => {
       if (aborted) {
         if (fullTextRef.v) {
-          callbacks.onComplete(fullTextRef.v);
+          callbacks.onComplete(fullTextRef.v, provenanceRef.v);
         }
         resolve();
         return;
@@ -222,7 +248,7 @@ export async function sendMessage(
 
     xhr.onabort = () => {
       if (fullTextRef.v) {
-        callbacks.onComplete(fullTextRef.v);
+        callbacks.onComplete(fullTextRef.v, provenanceRef.v);
       }
       resolve();
     };

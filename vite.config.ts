@@ -14,8 +14,15 @@ const httpsConfig = (() => {
   return undefined;
 })();
 
+const pkg = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "package.json"), "utf-8"),
+);
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   server: {
     port: 5173,
     strictPort: true,

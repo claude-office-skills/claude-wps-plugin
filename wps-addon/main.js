@@ -15,6 +15,7 @@ var TASKPANE_KEY = "claude_taskpane_id";
 var _ctxTimer = null;
 var _animState = null;
 var _codePollTimer = null;
+var _navPollTimer = null;
 var _syncToken = "sync_" + Date.now();
 
 // ── Ribbon 按钮回调 ──────────────────────────────────────────
@@ -219,10 +220,16 @@ function startBackgroundSync() {
       clearInterval(_codePollTimer);
     } catch (e) {}
   }
+  if (_navPollTimer) {
+    try {
+      clearInterval(_navPollTimer);
+    } catch (e) {}
+  }
   _syncToken = "sync_" + Date.now();
   pushWpsContext();
   _ctxTimer = setInterval(pushWpsContext, CTX_INTERVAL);
   _codePollTimer = setInterval(pollAndExecuteCode, CODE_POLL_INTERVAL);
+  _navPollTimer = setInterval(pollAndNavigate, 300);
 }
 
 // ── 上下文推送 ───────────────────────────────────────────────
@@ -573,10 +580,121 @@ function _processAnimRow() {
   st.tickWait = 1;
 }
 
+// ── 预注册函数表 — AI 可直接调用，避免生成完整代码 ──────
+var actionRegistry = {
+  fillColor: function (range, bgrColor) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).Interior.Color = bgrColor;
+    return "已将 " + range + " 背景色设为 " + bgrColor;
+  },
+  setFontColor: function (range, bgrColor) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).Font.Color = bgrColor;
+    return "已将 " + range + " 字体色设为 " + bgrColor;
+  },
+  clearRange: function (range) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).Clear();
+    return "已清空 " + range;
+  },
+  insertFormula: function (cell, formula) {
+    var ws = Application.ActiveSheet;
+    ws.Range(cell).Formula = formula;
+    return "已在 " + cell + " 插入公式 " + formula;
+  },
+  batchFormula: function (startCell, formula, count, direction) {
+    var ws = Application.ActiveSheet;
+    var r = ws.Range(startCell);
+    var row = r.Row,
+      col = r.Column;
+    for (var i = 0; i < count; i++) {
+      var target =
+        direction === "down" ? ws.Cells(row + i, col) : ws.Cells(row, col + i);
+      target.Formula = formula;
+    }
+    return "已批量填充 " + count + " 个单元格";
+  },
+  sortRange: function (range, colIndex, ascending) {
+    var ws = Application.ActiveSheet;
+    var rng = ws.Range(range);
+    var order = ascending !== false ? 1 : 2;
+    rng.Sort(rng.Columns(colIndex || 1), order);
+    return "已排序 " + range;
+  },
+  autoFilter: function (range) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).AutoFilter();
+    return "已为 " + range + " 添加筛选";
+  },
+  freezePane: function (row, col) {
+    var ws = Application.ActiveSheet;
+    ws.Cells(row || 2, col || 1).Select();
+    Application.ActiveWindow.FreezePanes = true;
+    return "已冻结窗格";
+  },
+  createSheet: function (name) {
+    var wb = Application.ActiveWorkbook;
+    var ws = wb.Sheets.Add(null, wb.Sheets.Item(wb.Sheets.Count));
+    if (name) ws.Name = name;
+    return "已创建工作表 " + (name || ws.Name);
+  },
+  setValue: function (range, value) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).Value2 = value;
+    return "已设置 " + range + " = " + value;
+  },
+  setColumnWidth: function (range, width) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).ColumnWidth = width;
+    return "已设置 " + range + " 列宽 " + width;
+  },
+  mergeCells: function (range) {
+    var ws = Application.ActiveSheet;
+    ws.Range(range).Merge();
+    return "已合并 " + range;
+  },
+};
+
 function executeInWps(code) {
-  var fn = new Function(code);
-  var result = fn();
-  return result === undefined ? "执行成功" : String(result);
+  try {
+    var parsed = JSON.parse(code);
+    if (parsed && parsed._action && actionRegistry[parsed._action]) {
+      var args = parsed._args || [];
+      return actionRegistry[parsed._action].apply(null, args);
+    }
+  } catch (e) {}
+
+  var prevAlerts = true;
+  var prevScreenUpdating = true;
+  try {
+    prevAlerts = Application.DisplayAlerts;
+  } catch (e) {}
+  try {
+    prevScreenUpdating = Application.ScreenUpdating;
+  } catch (e) {}
+  try {
+    Application.DisplayAlerts = false;
+  } catch (e) {}
+  try {
+    Application.ScreenUpdating = false;
+  } catch (e) {}
+  try {
+    var safeSheetGet =
+      "function _sheet(name){var wb=Application.ActiveWorkbook;" +
+      "for(var i=1;i<=wb.Sheets.Count;i++){if(wb.Sheets.Item(i).Name===name)return wb.Sheets.Item(i);}" +
+      "return null;}\n";
+    var wrappedCode = safeSheetGet + code;
+    var fn = new Function(wrappedCode);
+    var result = fn();
+    return result === undefined ? "执行成功" : String(result);
+  } finally {
+    try {
+      Application.ScreenUpdating = prevScreenUpdating;
+    } catch (e) {}
+    try {
+      Application.DisplayAlerts = prevAlerts;
+    } catch (e) {}
+  }
 }
 
 // ── HTTP 工具（同步 XHR）─────────────────────────────────────
@@ -602,4 +720,43 @@ function httpGet(url) {
   } catch (e) {
     return null;
   }
+}
+
+// ── 单元格/子表导航 ──────────────────────────────────────────
+
+function pollAndNavigate() {
+  try {
+    var resp = httpGet(PROXY_URL + "/pending-navigate");
+    if (!resp) return;
+    var data = JSON.parse(resp);
+    if (!data.pending) return;
+    navigateInWps(data.sheetName, data.cellAddress);
+  } catch (e) {}
+}
+
+function navigateInWps(sheetName, cellAddress) {
+  try {
+    var wb = Application.ActiveWorkbook;
+    if (!wb) return;
+
+    if (sheetName) {
+      var found = false;
+      var count = wb.Sheets.Count;
+      for (var i = 1; i <= count; i++) {
+        if (wb.Sheets.Item(i).Name === sheetName) {
+          wb.Sheets.Item(i).Activate();
+          found = true;
+          break;
+        }
+      }
+      if (!found) return;
+    }
+
+    if (cellAddress) {
+      var ws = Application.ActiveSheet;
+      try {
+        ws.Range(cellAddress).Select();
+      } catch (e) {}
+    }
+  } catch (e) {}
 }

@@ -185,10 +185,12 @@
 .chatArea {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .chatArea::-webkit-scrollbar {
@@ -372,11 +374,34 @@
   color: #a0a0f0;
 }
 
+.chipSelection {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #6ab0ff;
+  max-width: 280px;
+}
+
+[data-theme="light"] .chipSelection {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.25);
+  color: #2563eb;
+}
+
+.chipBadge {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.2);
+  color: inherit;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
 .chipLabel {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 120px;
+  max-width: 160px;
 }
 
 .chipRemove {

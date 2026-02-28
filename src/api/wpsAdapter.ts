@@ -93,6 +93,18 @@ export async function executeCode(
   throw new Error("代码执行超时（30秒）");
 }
 
+export async function navigateToCell(
+  sheetName: string,
+  cellAddress?: string,
+): Promise<void> {
+  await fetch(`${PROXY_URL}/navigate-to`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sheetName, cellAddress }),
+    signal: AbortSignal.timeout(3000),
+  });
+}
+
 export async function pollAddToChat(): Promise<AddToChatPayload | null> {
   try {
     const res = await fetch(`${PROXY_URL}/add-to-chat/poll`);

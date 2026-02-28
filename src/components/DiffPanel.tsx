@@ -1,5 +1,6 @@
-import { memo, useState } from "react";
+import { memo, useState, useCallback } from "react";
 import type { DiffResult } from "../types";
+import { navigateToCell } from "../api/wpsAdapter";
 import styles from "./DiffPanel.module.css";
 
 interface Props {
@@ -15,14 +16,31 @@ function DiffPanel({ diff }: Props) {
     : diff.changes.slice(0, COLLAPSED_LIMIT);
   const hasMore = diff.changes.length > COLLAPSED_LIMIT;
 
+  const handleCellClick = useCallback(
+    (cellAddress: string) => {
+      navigateToCell(diff.sheetName, cellAddress).catch(() => {});
+    },
+    [diff.sheetName],
+  );
+
+  const handleSheetClick = useCallback(() => {
+    navigateToCell(diff.sheetName).catch(() => {});
+  }, [diff.sheetName]);
+
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
-        <span className={styles.icon}>📊</span>
+        <span className={styles.icon}>●</span>
         <span className={styles.title}>
           已修改 {diff.changeCount} 个单元格
         </span>
-        <span className={styles.sheet}>{diff.sheetName}</span>
+        <button
+          className={styles.sheetLink}
+          onClick={handleSheetClick}
+          title={`跳转到 ${diff.sheetName}`}
+        >
+          {diff.sheetName} ↗
+        </button>
       </div>
 
       <div className={styles.table}>
@@ -33,7 +51,13 @@ function DiffPanel({ diff }: Props) {
         </div>
         {visible.map((ch) => (
           <div key={ch.cell} className={styles.row}>
-            <span className={styles.colCell}>{ch.cell}</span>
+            <button
+              className={`${styles.colCell} ${styles.cellLink}`}
+              onClick={() => handleCellClick(ch.cell)}
+              title={`跳转到 ${ch.cell}`}
+            >
+              {ch.cell}
+            </button>
             <span className={`${styles.colBefore} ${styles.removed}`}>
               {formatVal(ch.before)}
             </span>

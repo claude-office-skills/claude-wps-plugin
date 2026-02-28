@@ -4,6 +4,37 @@
   background: var(--code-bg);
   margin: 8px 0;
   border: 1px solid var(--code-border);
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.wrapperRunning {
+  border-color: rgba(136, 136, 136, 0.3);
+}
+
+.execPulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    #888888 50%,
+    transparent 100%
+  );
+  background-size: 3px 60px;
+  animation: pulseSlide 1.2s ease-in-out infinite;
+  z-index: 2;
+}
+
+@keyframes pulseSlide {
+  0% { transform: translateY(-100%); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
 }
 
 .header {
@@ -39,8 +70,8 @@
 .streamingBadge {
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 9px;
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.12);
+  color: var(--text-muted);
+  background: rgba(136, 136, 136, 0.12);
   padding: 1px 6px;
   border-radius: 3px;
   animation: pulse 1.5s ease-in-out infinite;
@@ -110,7 +141,7 @@
   cursor: pointer;
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 11px;
-  color: #6366f1;
+  color: var(--text-muted);
   transition: background 0.15s;
 }
 
@@ -133,7 +164,7 @@
 .statusSuccess {
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 10px;
-  color: #22c55e;
+  color: var(--success);
 }
 
 .statusError {
@@ -162,9 +193,9 @@
 .runBtn {
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 10px;
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: var(--text-muted);
+  background: rgba(136, 136, 136, 0.1);
+  border: 1px solid rgba(136, 136, 136, 0.2);
   border-radius: 4px;
   cursor: pointer;
   padding: 2px 8px;
@@ -175,7 +206,7 @@
 }
 
 .runBtn:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(136, 136, 136, 0.2);
 }
 
 .runBtn:disabled {
@@ -187,22 +218,24 @@
 
 .result {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px 12px;
   background: var(--code-result);
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 11px;
-  color: #22c55e;
+  color: var(--success);
   border-top: 1px solid var(--code-border);
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .resultLabel {
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.1);
+  color: var(--success);
+  background: var(--success-bg);
   padding: 2px 6px;
   border-radius: 3px;
   flex-shrink: 0;
@@ -227,6 +260,9 @@
   word-break: break-word;
   flex: 1;
   line-height: 1.4;
+  max-height: 4.2em;
+  overflow-y: auto;
+  min-width: 0;
 }
 
 .resultError {
