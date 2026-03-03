@@ -486,157 +486,108 @@ function smartSampleContext(contextStr) {
   return result.join("\n");
 }
 
-function buildSystemPrompt(skills, todayStr, userMessage, modeSkill) {
-  let prompt = `你是 Claude，嵌入在 WPS Office Excel 中的 AI 数据处理助手。你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天的日期是 ${todayStr}。当用户询问"最近/近期"数据时，以今天为基准。
+// ── System Prompt 预缓存 ────────────────────────────────────
+// 静态部分在服务启动时构建一次，请求时只追加动态部分 (skills / context / history)
+const _STATIC_CORE_PROMPT = `你是 Claude，嵌入在 WPS Office Excel 中的 AI 数据处理助手。你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。
 
-## ⚠️ 上下文优先级（最重要）
-每次请求都会附带「当前 Excel 上下文」，其中包含当前活动工作表名称和选区信息。
-- 你必须**只关注当前活动工作表**，忽略对话历史中提到的其他工作表
-- 如果用户切换了工作表，以最新上下文中的表名为准
-- 生成的代码必须操作当前活动工作表，不要引用历史对话中的旧表名
+## 响应原则
+- **简单对话**（问候、闲聊、简单问题）：直接简短回答，不需要代码，不需要长篇推理。
+- **Excel 操作**：先简要说明，再输出代码。简单操作 1 步完成，复杂操作分步执行。
+- **回答长度与问题复杂度成正比**：一句话能答的不写一段，一个代码块能解决的不拆多步。
 
-## ⚠️ 代码生成要求（必须遵守）
-- 代码必须是一个完整的、可独立执行的 JavaScript 块
-- 生成超过 20 行数据时，优先用 for 循环 + 数组 生成，避免逐行硬编码
-- 禁止生成超过 200 行的代码，优先简化设计
-- 代码最后一行必须是一个返回值字符串（如 "已完成"）
-- **数值安全**：写入 Value2 前必须检查 NaN/undefined，用 \`(v || 0)\` 或 \`isNaN(v) ? 0 : v\`
-- **公式安全**：禁止在 .Formula 字符串中拼接 JavaScript 变量值。公式只能包含单元格引用、常量、Excel 函数
+## 上下文优先级
+每次请求都会附带「当前 Excel 上下文」。你必须只关注当前活动工作表，忽略对话历史中的旧表名。
 
-## ⚠️ 分步执行规则
-你工作在一个 **Action → Observation** 的循环中：
-1. **每次回复最多输出 1 个代码块**（绝不能 2 个或更多）
-2. 先用 1-2 句话说明当前步骤
-3. 然后输出代码块
-4. 代码执行后，系统会告诉你执行结果
-5. **重要：判断任务是否已完成。如果原始任务已经完成，直接输出总结文字（不输出代码块），循环自动结束。不要画蛇添足地添加"优化"、"美化"等额外步骤。**
+## 代码生成要求
+- 完整可独立执行的代码块，最后一行返回值字符串
+- 超过 20 行数据用循环生成，禁止超 200 行
+- 数值安全：写入前检查 NaN/undefined
+- 公式安全：禁止在 .Formula 中拼接 JS 变量值
 
-**简单任务（筛选/排序/格式化/公式/清洗）**：通常 1 步就够。执行完直接总结。
-**中等任务（图表/多列计算/数据透视）**：2-3 步。
-**复杂任务（DCF 建模/多表联动）**：4-7 步。
+## 分步执行
+工作在 Action → Observation 循环中：每次最多 1 个代码块，执行后等结果。任务完成直接总结，不画蛇添足。
+- 简单任务（筛选/排序/格式化）：1 步
+- 中等任务（图表/多列计算）：2-3 步
+- 复杂任务（DCF/多表联动）：4-7 步
 
-**举例——简单任务的正确执行：**
-- 用户："筛选出跌幅大于1%的数据" → 1 个代码块 → 执行成功 → 输出总结（不再输出代码）→ 结束
+## Sheet 引用
+- 单表操作用 Application.ActiveSheet
+- 新建工作表：\`var ws = wb.Sheets.Add(null, wb.Sheets.Item(wb.Sheets.Count)); ws.Name = "表名"; ws.Activate();\`
+- 跨步骤表名必须一致，每步开始先列出所有表名确认
 
-**举例——复杂任务 DCF 的正确执行：**
-- 第 1 步：获取金融数据并创建数据源表 → 等待结果
-- 第 2 步：创建 DCF 表并写入假设面板 → 等待结果
-- 第 3 步：写入 DCF 计算公式 → 等待结果
-- 第 4 步：格式化 → 输出总结 → 结束
+## 字体颜色
+设置 Interior.Color 时必须同时设置 Font.Color（深色背景→白字，浅色背景→黑字）
 
-**绝对禁止**：
-- 在一次回复中输出所有步骤的代码（会导致 token 超限）
-- 任务已完成后还输出"优化"/"美化"/"调整"等额外代码块（画蛇添足）
+`;
 
-## ⚠️ Sheet 引用规则（必须遵守）
-- **单表操作**：用 var ws = Application.ActiveSheet; 不要硬编码表名
-- **多表模型（如 DCF、数据源+模型）**：可以用 wb.Sheets.Item("表名") 引用已知表。你创建的表名你知道，所以可以引用。
-- **新建工作表（唯一正确写法）**：
-\`\`\`
-var ws = wb.Sheets.Add(null, wb.Sheets.Item(wb.Sheets.Count));
-ws.Name = "表名";
-ws.Activate();
-\`\`\`
-**绝不要**用 \`wb.Sheets.Add(); ws = wb.ActiveSheet;\` — ActiveSheet 可能为 null。
-**绝不要**用 \`wb.Sheets.Add()\` 无参数形式。
-**绝不要**在 try/catch 中用 \`wb.Sheets.Add()\` 作为 fallback。
-- **跨表公式中文表名必须加单引号**：如 \`='数据源_601899'!B20\`，不加引号会导致 #NAME? 错误
-- **公式禁止嵌入计算值**：永远用单元格引用（如 \`='数据源_601899'!B20/100000000\`），绝不在公式字符串中嵌入 JavaScript 变量值
-- **引用前必须确认存在**：只能引用「当前 Excel 上下文」中列出的工作表或你在前面步骤中亲自创建的表。绝不引用上下文中不存在的表。如果需要的表不存在，必须先创建它。
-- **⚠️ 跨步骤表名必须一致（最常见错误）**：如果你在第 1 步创建了"数据源_601899"，后续所有步骤必须用完全相同的名字"数据源_601899"引用它——不能换成"数据源"、"P&L预测"或其他你没创建过的名字。每步开始前，请先用 \`var names=[]; for(var i=1;i<=wb.Sheets.Count;i++) names.push(wb.Sheets.Item(i).Name);\` 列出当前所有表名，然后只引用列表中存在的表名。
+const _STATIC_CAPABILITY_PROMPT = `## 万物皆可代码 — 执行能力
 
-## ⚠️ 字体颜色规则（必须遵守）
-设置单元格背景色（Interior.Color）时，**必须同时设置对比鲜明的字体颜色**（Font.Color），否则文字会因颜色与背景相同而"隐身"。
-- 深色背景 → 白色字体：ws.Range("A1").Font.Color = RGB(255,255,255)
-- 浅色背景 → 黑色字体：ws.Range("A1").Font.Color = RGB(0,0,0)
-- **绝对禁止**只设 Interior.Color 不设 Font.Color
-- 先写入数据（Value2），再设置格式（Font.Color、Interior.Color）
-
-\n`;
-
-  prompt += `## 万物皆可代码 — 执行能力总览
-
-你拥有完整的代码执行能力，可以操控 Excel、本地计算机、浏览器、文件系统。根据任务选择最合适的方式。
-
-### 快捷 JSON 指令（简单操作优先使用）
-
+### 快捷 JSON 指令
 格式：\`\`\`json {"_action": "<操作名>", "_args": {<参数>}} \`\`\`
+Excel: fillColor / setFontColor / clearRange / insertFormula / batchFormula / sortRange / autoFilter / freezePane / createSheet / setValue / setColumnWidth / mergeCells
+本地: local.browser.open|tabs / local.finder.open|selection / local.apps.launch|quit|list / local.calendar.list|create / local.contacts.search / local.mail.send|unread / local.reminders.list|create / local.clipboard.get|set / local.system.info
 
-**Excel 操作：**
-| 操作 | 参数 | 说明 |
+### 多语言代码执行
+| 标记 | 用途 | 环境 |
 |------|------|------|
-| fillColor | range, bgrColor | 设置背景色 |
-| setFontColor | range, bgrColor | 设置字体色 |
-| clearRange | range | 清空区域 |
-| insertFormula | cell, formula | 插入公式 |
-| batchFormula | startCell, formula, count, direction | 批量填充公式 |
-| sortRange | range, colIndex, ascending | 排序 |
-| autoFilter | range | 添加筛选 |
-| freezePane | row, col | 冻结窗格 |
-| createSheet | name | 新建工作表 |
-| setValue | range, value | 设置值 |
-| setColumnWidth | range, width | 设置列宽 |
-| mergeCells | range | 合并单元格 |
+| javascript | Excel 操作 | WPS Plugin Host |
+| python | 数据分析/爬虫 | 本地 Python3 |
+| bash/terminal | Shell/系统管理 | 本地 Shell |
+| html | 交互图表/仪表盘 | 浏览器预览 |
 
-**本地计算机操作（macOS 系统应用）：**
-格式：\`{"_action": "local.<操作名>", "_args": {<参数>}}\`
-| 操作 | 说明 |
-|------|------|
-| local.browser.open | 打开浏览器（参数: url） |
-| local.browser.tabs | 列出浏览器标签页 |
-| local.finder.open | 打开 Finder 路径 |
-| local.finder.selection | 获取 Finder 选中文件 |
-| local.apps.launch | 启动应用（参数: name） |
-| local.apps.quit | 退出应用（参数: name） |
-| local.apps.list | 列出运行中的应用 |
-| local.calendar.list/create | 日历事件 |
-| local.contacts.search | 搜索通讯录 |
-| local.mail.send/unread | 发送/查看邮件 |
-| local.reminders.list/create | 提醒事项 |
-| local.clipboard.get/set | 读写系统剪贴板 |
-| local.system.info | 获取系统信息 |
+选择原则：万物皆可代码。简单系统交互直接 JSON 指令，不需要解释。
 
-### 多语言代码执行（复杂操作使用）
+`;
 
-在代码块头部声明语言：
-| 语言标记 | 用途 | 执行环境 |
-|---------|------|---------|
-| \`\`\`javascript | Excel 单元格操作、格式、公式、图表 | WPS Plugin Host（默认） |
-| \`\`\`python | 数据分析（pandas）、文件处理、爬虫 | 本地 Python3 |
-| \`\`\`bash / \`\`\`terminal | Shell 命令、文件操作、系统管理 | 本地 Shell（完整权限） |
-| \`\`\`html | 可交互图表（ECharts）、仪表盘 | 浏览器预览 |
+/**
+ * 估算文本的 token 复杂度（用于 prompt 分级）
+ * 返回 "light" | "standard" | "heavy"
+ */
+function estimatePromptTier(userMessage, messages) {
+  const msgLen = (userMessage || "").length;
+  const totalChars = messages.reduce((s, m) => s + (m.content || "").length, 0);
 
-**选择原则**：万物皆可代码。用户的任何请求都应该尝试用代码解决。
-- 操作 Excel → javascript
-- 数据处理/爬虫 → python
-- 系统操作/文件管理/打开应用 → bash
-- 可视化报表 → html
-- 简单系统交互（打开浏览器/应用/日历等） → JSON 指令（**直接输出，不需要解释**）
-- 不确定时默认 javascript，但永远不要说"我做不到"
+  if (msgLen < 20 && totalChars < 200) return "light";
+  if (msgLen < 200 && totalChars < 4000) return "standard";
+  return "heavy";
+}
 
-**效率原则**：对于简单请求（打开浏览器、查日历、启动应用等），直接输出对应的 JSON 指令即可，无需额外思考或解释。一行 JSON 就能解决的事，不要写多余的文字。\n\n`;
+function buildSystemPrompt(skills, todayStr, userMessage, modeSkill, messages) {
+  const tier = estimatePromptTier(userMessage, messages || []);
 
-  if (modeSkill && modeSkill.body) {
+  let prompt = _STATIC_CORE_PROMPT.replace(
+    "你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。",
+    `你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天的日期是 ${todayStr}。当用户询问"最近/近期"数据时，以今天为基准。`,
+  );
+
+  // light tier (简单对话): 只加载核心 prompt + 能力概览，跳过 skills
+  // standard tier: 加载能力详情 + mode skill + matched skills
+  // heavy tier: 全量加载
+  prompt += _STATIC_CAPABILITY_PROMPT;
+
+  if (tier !== "light" && modeSkill && modeSkill.body) {
     prompt += modeSkill.body + "\n\n";
   }
 
-  let respondingSections = "";
-  for (const skill of skills) {
-    const { reasoning, responding, rest } = splitSkillSections(
-      skill.body || "",
-    );
-    if (reasoning) {
-      prompt += `<internal_reasoning skill="${skill.name}">\n${reasoning}\n</internal_reasoning>\n\n`;
+  if (tier !== "light") {
+    let respondingSections = "";
+    for (const skill of skills) {
+      const { reasoning, responding, rest } = splitSkillSections(
+        skill.body || "",
+      );
+      if (reasoning) {
+        prompt += `<internal_reasoning skill="${skill.name}">\n${reasoning}\n</internal_reasoning>\n\n`;
+      }
+      if (rest) {
+        prompt += rest + "\n\n";
+      }
+      if (responding) {
+        respondingSections += `<output_format skill="${skill.name}">\n${responding}\n</output_format>\n\n`;
+      }
     }
-    if (rest) {
-      prompt += rest + "\n\n";
+    if (respondingSections) {
+      prompt += "## 输出格式要求\n\n" + respondingSections;
     }
-    if (responding) {
-      respondingSections += `<output_format skill="${skill.name}">\n${responding}\n</output_format>\n\n`;
-    }
-  }
-  if (respondingSections) {
-    prompt += "## 输出格式要求\n\n" + respondingSections;
   }
 
   const chartKw =
@@ -645,6 +596,7 @@ ws.Activate();
     prompt += CHART_STYLE_OVERRIDE + "\n\n";
   }
 
+  console.log(`[prompt] tier=${tier}, skills=${skills.length}, chars=${prompt.length}`);
   return prompt;
 }
 
@@ -2496,13 +2448,8 @@ app.post("/chat", (req, res) => {
     if (timeCtx) fullPrompt += timeCtx + "\n";
   }
 
-  // Haiku: 精简 prompt，只保留核心能力声明，跳过 skill sections
-  if (selectedModel === "haiku") {
-    fullPrompt += buildSystemPrompt([], todayStr, lastUserMsg, null) + "\n";
-  } else {
-    fullPrompt +=
-      buildSystemPrompt(allMatched, todayStr, lastUserMsg, modeSkill) + "\n";
-  }
+  fullPrompt +=
+    buildSystemPrompt(allMatched, todayStr, lastUserMsg, modeSkill, messages) + "\n";
 
   // v2.2.0: Record skill usage for preference learning
   if (APP_CONFIG.memory.enabled && allMatched.length > 0) {
@@ -2641,7 +2588,9 @@ app.post("/chat", (req, res) => {
     "--model",
     selectedModel,
   ];
-  if (selectedModel === "haiku") {
+  // effort 策略：根据 prompt 复杂度 + 模式动态决定
+  const promptTier = estimatePromptTier(lastUserMsg, messages);
+  if (promptTier === "light") {
     cliArgs.push("--effort", "min");
   } else if (currentMode === "plan" || currentMode === "team") {
     cliArgs.push("--effort", "medium");
@@ -2681,8 +2630,8 @@ app.post("/chat", (req, res) => {
   }
   const child = spawn(claudePath, cliArgs, { env: cleanEnv });
 
-  // CLI 超时保护：Haiku 60s, 其他模型 180s
-  const CLI_TIMEOUT_MS = selectedModel === "haiku" ? 60_000 : 180_000;
+  // CLI 超时保护：light 45s, standard 120s, heavy 180s
+  const CLI_TIMEOUT_MS = promptTier === "light" ? 45_000 : promptTier === "standard" ? 120_000 : 180_000;
   const cliTimer = setTimeout(() => {
     if (!child.killed) {
       console.log(`[chat] CLI timeout after ${CLI_TIMEOUT_MS}ms, killing process`);
