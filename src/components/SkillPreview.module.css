@@ -1,0 +1,128 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel {
+  background: var(--bg-base);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  width: 88%;
+  max-width: 480px;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+}
+
+.headerActions {
+  display: flex;
+  gap: 6px;
+}
+
+.editBtn,
+.saveBtn,
+.cancelBtn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.editBtn {
+  color: var(--ui-accent);
+  background: var(--ui-accent-bg);
+  border-color: var(--ui-accent-border);
+}
+
+.saveBtn {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: rgba(139, 168, 139, 0.3);
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cancelBtn {
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+}
+
+.error {
+  padding: 6px 14px;
+  color: var(--error);
+  font-size: 11px;
+  background: var(--error-bg);
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.loading {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 24px 0;
+}
+
+.content {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.editor {
+  width: 100%;
+  min-height: 300px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  resize: vertical;
+}

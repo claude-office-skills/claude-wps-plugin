@@ -1,0 +1,299 @@
+/* ── SidebarBlock: unified container for all 15+ block types ── */
+
+.block {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+  border: 1px solid var(--border-subtle);
+  transition: border-color var(--transition-normal, 0.15s);
+}
+
+.block:hover {
+  border-color: var(--border-primary);
+}
+
+/* Left stripe indicator — subtle 2px neutral border, no color or animation */
+.stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  z-index: 1;
+  background: var(--border-primary);
+}
+
+/* Running state: no animation, just slightly brighter */
+.stripeRunning {
+  background: var(--border-primary);
+  opacity: 0.6;
+}
+
+/* ── Header ── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px 6px 14px;
+  min-height: 32px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.headerIcon {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+}
+
+.headerTitle {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.headerBadge {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Body ── */
+
+.body {
+  padding: 0;
+  min-width: 0;
+}
+
+/* ── Footer ── */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px 6px 14px;
+  border-top: 1px solid var(--border-subtle);
+  gap: 8px;
+}
+
+.footerInfo {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Shared action button styles ── */
+
+.actionBtn {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(136, 136, 136, 0.1);
+  border: 1px solid rgba(136, 136, 136, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px 8px;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background: rgba(136, 136, 136, 0.2);
+}
+
+.actionBtn:disabled {
+  color: var(--text-faint);
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+}
+
+.actionBtnPrimary {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.actionBtnPrimary:hover:not(:disabled) {
+  background: rgba(217, 119, 87, 0.2);
+}
+
+.actionBtnDanger {
+  color: var(--error);
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+.actionBtnDanger:hover:not(:disabled) {
+  background: rgba(200, 123, 123, 0.2);
+}
+
+.iconBtn {
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.iconBtn:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ── Status indicators ── */
+
+.statusSuccess {
+  font-size: 10px;
+  color: var(--success);
+}
+
+.statusError {
+  font-size: 10px;
+  color: var(--error);
+}
+
+.statusRunning {
+  font-size: 10px;
+  color: var(--text-muted);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Ambient blocks (thinking, memory, reference) ── */
+
+.ambientBlock {
+  border-color: transparent;
+}
+
+.ambientBlock:hover {
+  border-color: var(--border-subtle);
+}
+
+/* ── Collapsible toggle ── */
+
+.toggleBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggleArrow {
+  font-size: 8px;
+  color: var(--text-placeholder);
+  display: inline-block;
+  transition: transform 0.2s;
+}
+
+.toggleArrowOpen {
+  transform: rotate(90deg);
+}
+
+/* ── Progress bar ── */
+
+.progressBar {
+  height: 3px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ── Plan step states ── */
+
+.stepDot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.stepPending {
+  background: var(--bg-hover);
+  color: var(--text-placeholder);
+}
+
+.stepRunning {
+  background: var(--accent-bg);
+  color: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.stepSuccess {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.stepFailed {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.stepSkipped {
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  text-decoration: line-through;
+}

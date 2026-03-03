@@ -108,6 +108,9 @@
   overflow-y: auto;
   overflow-x: auto;
   background: var(--code-bg);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .codeScroll::-webkit-scrollbar {
@@ -164,7 +167,7 @@
 .statusSuccess {
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 10px;
-  color: var(--success);
+  color: var(--text-muted);
 }
 
 .statusError {
@@ -224,7 +227,7 @@
   background: var(--code-result);
   font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   font-size: 11px;
-  color: var(--success);
+  color: var(--text-secondary);
   border-top: 1px solid var(--code-border);
   max-width: 100%;
   overflow: hidden;
@@ -234,8 +237,8 @@
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
-  color: var(--success);
-  background: var(--success-bg);
+  color: var(--text-muted);
+  background: rgba(136, 136, 136, 0.1);
   padding: 2px 6px;
   border-radius: 3px;
   flex-shrink: 0;

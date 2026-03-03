@@ -1,7 +1,7 @@
 import { useState, useLayoutEffect, useRef } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { executeCode } from "../api/wpsAdapter";
+import { executeCode, executePython, executeShell, previewHtml } from "../api/wpsAdapter";
 import type { CodeBlock as CodeBlockType } from "../types";
 import DiffPanel from "./DiffPanel";
 import styles from "./CodeBlock.module.css";
@@ -53,86 +53,24 @@ export default function CodeBlock({
 
   const handleRun = async () => {
     setRunning(true);
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "fc5e63",
-      },
-      body: JSON.stringify({
-        sessionId: "fc5e63",
-        location: "CodeBlock.tsx:handleRun",
-        message: "Manual execute clicked",
-        data: {
-          blockId: block.id,
-          lang: block.language,
-          codeLen: block.code.length,
-          first120: block.code.slice(0, 120),
-          hasImport: /\bimport\b/.test(block.code),
-          hasExport: /\bexport\b/.test(block.code),
-          hasArrow: /=>/.test(block.code),
-          hasConst: /\bconst\b/.test(block.code),
-          hasLet: /\blet\b/.test(block.code),
-        },
-        timestamp: Date.now(),
-        hypothesisId: "H",
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
-      const { result, diff } = await executeCode(block.code);
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "fc5e63",
-          },
-          body: JSON.stringify({
-            sessionId: "fc5e63",
-            location: "CodeBlock.tsx:handleRun:success",
-            message: "Execution succeeded",
-            data: {
-              blockId: block.id,
-              resultLen: result?.length,
-              diffChanges: diff?.changeCount,
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
+      const lang = (block.language || "javascript").toLowerCase();
+      let execResult: { result: string; diff?: import("../types").DiffResult | null };
+
+      if (lang === "python" || lang === "py") {
+        execResult = await executePython(block.code);
+      } else if (lang === "bash" || lang === "shell" || lang === "sh") {
+        execResult = await executeShell(block.code);
+      } else if (lang === "html" || lang === "htm") {
+        execResult = await previewHtml(block.code);
+      } else {
+        execResult = await executeCode(block.code);
+      }
+
+      const { result, diff } = execResult;
       onExecuted(block.id, result, undefined, diff);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "fc5e63",
-          },
-          body: JSON.stringify({
-            sessionId: "fc5e63",
-            location: "CodeBlock.tsx:handleRun:error",
-            message: "Execution failed",
-            data: {
-              blockId: block.id,
-              error: errMsg,
-              codeFirst200: block.code.slice(0, 200),
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
       onExecuted(block.id, "", errMsg);
     } finally {
       setRunning(false);
@@ -239,6 +177,10 @@ export default function CodeBlock({
               fontSize: 11.5,
               lineHeight: "1.6",
               background: "transparent",
+              overflowX: "auto",
+              width: "100%",
+              minWidth: 0,
+              boxSizing: "border-box",
             }}
             wrapLines
           >

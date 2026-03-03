@@ -306,10 +306,44 @@ function collectWpsContext() {
       var ws2 = Application.ActiveSheet;
       var ur = ws2.UsedRange;
       if (ur && ur.Address) {
+        var urRowCount = ur.Rows.Count;
+        var urColCount = ur.Columns.Count;
+        var urSampleRows = Math.min(urRowCount, 50);
+        var urSampleCols = Math.min(urColCount, 20);
+        var urSampleValues = [];
+        try {
+          var urTopLeft = CL(ur.Column) + ur.Row;
+          var urBotRight = CL(ur.Column + urSampleCols - 1) + (ur.Row + urSampleRows - 1);
+          var urVals = ws2.Range(urTopLeft + ":" + urBotRight).Value2;
+          if (urVals) {
+            if (urSampleRows === 1 && urSampleCols === 1) {
+              urSampleValues = [[urVals === undefined ? "" : urVals]];
+            } else if (urSampleRows === 1) {
+              urSampleValues = [urVals];
+            } else {
+              for (var uri = 0; uri < urVals.length; uri++) {
+                var urRow = urVals[uri];
+                var urOutRow = [];
+                if (Array.isArray(urRow)) {
+                  for (var uci = 0; uci < urRow.length; uci++) {
+                    var uv = urRow[uci];
+                    urOutRow.push(uv === undefined || uv === null ? "" : uv);
+                  }
+                } else {
+                  urOutRow.push(urRow === undefined || urRow === null ? "" : urRow);
+                }
+                urSampleValues.push(urOutRow);
+              }
+            }
+          }
+        } catch (e) { urSampleValues = []; }
         result.usedRange = {
           address: ur.Address.replace(/\$/g, ""),
-          rowCount: ur.Rows.Count,
-          colCount: ur.Columns.Count,
+          rowCount: urRowCount,
+          colCount: urColCount,
+          hasMoreRows: urRowCount > 50,
+          hasMoreCols: urColCount > 20,
+          sampleValues: urSampleValues,
         };
       }
     } catch (e) {}

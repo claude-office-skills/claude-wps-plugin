@@ -38,6 +38,10 @@
   --error-bg:        rgba(200, 123, 123, 0.1);
   --error-border:    rgba(200, 123, 123, 0.3);
 
+  /* Mode 信号色 */
+  --plan-color:      #e5b45a;
+  --ask-color:       #4ade80;
+
   /* 代码块 — Cursor 风格弱化 */
   --code-bg:     #1a1a1a;
   --code-header: #1a1a1a;
@@ -80,6 +84,10 @@
   --border-primary: #e0e0e0;
   --border-subtle:  rgba(0, 0, 0, 0.12);
   --border-input:   rgba(0, 0, 0, 0.10);
+
+  /* Mode 信号色 */
+  --plan-color:      #c49a30;
+  --ask-color:       #22c55e;
 
   /* 代码块 */
   --code-bg:     #f0f0f5;

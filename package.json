@@ -1,7 +1,7 @@
 {
 	"name": "claude-wps-plugin",
 	"private": true,
-	"version": "2.0.0-dev",
+	"version": "2.2.0",
 	"type": "module",
 	"addonType": "et",
 	"scripts": {
@@ -24,8 +24,11 @@
 		"@lobehub/icons": "^4.6.0",
 		"cors": "^2.8.6",
 		"express": "^5.2.1",
+		"firebase": "^12.10.0",
 		"js-yaml": "^4.1.1",
 		"nanoid": "^5.1.6",
+		"node-cron": "^4.2.1",
+		"nodemailer": "^8.0.1",
 		"pdf-parse": "^2.4.5",
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0",

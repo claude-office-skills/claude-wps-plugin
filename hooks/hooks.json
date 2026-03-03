@@ -1,0 +1,48 @@
+{
+  "hooks": [
+    {
+      "event": "PreCodeExecute",
+      "type": "block",
+      "name": "block-delete-sheet",
+      "conditions": [
+        {
+          "field": "code",
+          "operator": "regex_match",
+          "pattern": "\\.(Delete|Remove)\\s*\\(|Sheets\\.Item.*\\.Delete|ActiveSheet\\.Delete"
+        }
+      ],
+      "message": "⚠️ 检测到删除工作表操作。此操作不可撤销，请手动在 Excel 中执行。"
+    },
+    {
+      "event": "PreCodeExecute",
+      "type": "block",
+      "name": "block-clear-large-range",
+      "conditions": [
+        {
+          "field": "code",
+          "operator": "regex_match",
+          "pattern": "UsedRange\\.(Clear|Delete)|Cells\\.Clear|Range\\(\"A:Z\"\\)\\.Clear"
+        }
+      ],
+      "message": "⚠️ 检测到清空大范围数据操作。请确认后在 Excel 中手动执行。"
+    },
+    {
+      "event": "PreCodeExecute",
+      "type": "log",
+      "name": "audit-write-operations",
+      "conditions": [
+        {
+          "field": "code",
+          "operator": "regex_match",
+          "pattern": "\\.Value\\s*=|\\.Formula\\s*=|\\.NumberFormat\\s*="
+        }
+      ]
+    },
+    {
+      "event": "PostCodeExecute",
+      "type": "log",
+      "name": "audit-execution-result",
+      "conditions": []
+    }
+  ]
+}

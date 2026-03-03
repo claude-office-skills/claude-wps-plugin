@@ -1,0 +1,153 @@
+/* ── 1. ScanLine — 扫光效果 ── */
+
+.scanLineTrack {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--bg-hover);
+}
+
+.scanLineGlow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 35%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 50%,
+    transparent 100%
+  );
+  animation: scanMove 2s ease-in-out infinite;
+}
+
+@keyframes scanMove {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(380%); }
+}
+
+/* ── 2. SkeletonLine — 骨架屏行 ── */
+
+.skeletonWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.skeletonBar {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-hover) 25%,
+    var(--bg-active) 50%,
+    var(--bg-hover) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── 3. PulseOrb — 脉冲光球 ── */
+
+.pulseOrbWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pulseOrb {
+  border-radius: 50%;
+  animation: orbPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 0.6;
+    box-shadow: 0 0 8px 2px currentColor;
+  }
+}
+
+.pulseLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ── 4. StatusBar — 全局状态条 ── */
+
+.statusBar {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+.statusFillActive {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.statusFillDone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  animation: statusFade 1s ease-out forwards;
+}
+
+@keyframes statusFade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── 5. TypeCursor — 打字光标 ── */
+
+.typeCursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  border-radius: 1px;
+  vertical-align: text-bottom;
+  animation: cursorBlink 0.8s step-end infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ── 6. ProgressRing — 环形进度 ── */
+
+.progressRing {
+  flex-shrink: 0;
+}
+
+.progressRingFill {
+  transition: stroke-dashoffset 0.3s ease;
+}

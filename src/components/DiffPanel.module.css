@@ -134,14 +134,14 @@
 }
 
 .removed {
-  color: #997070;
-  background: rgba(153, 112, 112, 0.08);
+  color: var(--text-faint);
+  background: transparent;
   text-decoration: line-through;
 }
 
 .added {
-  color: #6b9b6b;
-  background: rgba(107, 155, 107, 0.08);
+  color: var(--text-secondary);
+  background: transparent;
 }
 
 .toggleBtn {

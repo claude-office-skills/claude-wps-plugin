@@ -1,0 +1,138 @@
+.cardList {
+  padding: 6px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sectionLabel {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+  padding-left: 2px;
+}
+
+/* ── Inline Card ── */
+
+.inlineCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  color: var(--text-secondary);
+}
+
+.inlineIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ── Expanded Card ── */
+
+.expandedCard {
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.expandedHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: background 0.1s;
+}
+
+.expandedHeader:hover {
+  background: var(--bg-hover);
+}
+
+.expandedIcon {
+  color: var(--accent);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.expandedLabel {
+  flex: 1;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+}
+
+.expandedToggle {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.expandedBody {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-main);
+}
+
+.expandedMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  color: var(--text-muted);
+}
+
+/* ── MCP Card ── */
+
+.mcpCard {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.mcpHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mcpBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #2DD4BF;
+  color: #000;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.mcpServer {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.mcpStatus {
+  font-size: 9px;
+  color: var(--accent);
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.mcpBody {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}

@@ -3,7 +3,7 @@
 .msgRow {
   display: flex;
   flex-direction: column;
-  padding: 10px 0 6px;
+  padding: 6px 0 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   min-width: 0;
 }
@@ -14,6 +14,86 @@
   background: var(--bg-elevated, #2a2a2a);
   border-radius: 10px;
   padding: 10px 14px;
+}
+
+/* 最新用户提问框吸顶 sticky（Cursor 风格） */
+.stickyUserRow {
+  position: sticky;
+  top: -8px;
+  z-index: 10;
+  background: var(--bg-base);
+  padding-top: 8px;
+  padding-bottom: 6px;
+  margin-left: -14px;
+  margin-right: -14px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.stickyUserRow::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -12px;
+  height: 12px;
+  background: linear-gradient(to bottom, var(--bg-base), transparent);
+  pointer-events: none;
+}
+
+/* 用户消息编辑态 */
+.userEditWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.userEditArea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  padding: 2px 0;
+  font-family: inherit;
+}
+
+.userEditActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.userEditCancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.userEditCancel:hover {
+  border-color: var(--text-muted);
+}
+
+.userEditSubmit {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.userEditSubmit:hover {
+  opacity: 0.85;
 }
 
 /* ── 自动续接（代码块风格弱化线框）── */
@@ -201,8 +281,8 @@
 }
 
 .assistContent th {
-  background: var(--badge-bg);
-  color: var(--accent);
+  background: transparent;
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
@@ -222,6 +302,9 @@
 .tableWrap {
   overflow-x: auto;
   margin: 6px 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .inlineCode {
@@ -246,33 +329,24 @@
   padding: 8px 0;
 }
 
+/* 与 activities 一致的灰色炫光文字，去掉紫色 */
 .thinkingLabel {
   font-size: 13px;
-  color: var(--text-muted);
   font-weight: 500;
-  position: relative;
-  overflow: hidden;
-}
-
-.thinkingLabel::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 50%;
-  height: 100%;
   background: linear-gradient(
     90deg,
-    transparent,
-    rgba(99, 102, 241, 0.3),
-    transparent
+    #555 20%,
+    #999 40%,
+    #bbb 50%,
+    #999 60%,
+    #555 80%
   );
-  animation: sweepLight 2s ease-in-out infinite;
-}
-
-@keyframes sweepLight {
-  0% { left: -50%; }
-  100% { left: 150%; }
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: activityShimmer 2s linear infinite;
+  display: inline-block;
 }
 
 .thinkingTimer {
@@ -334,8 +408,8 @@
   overflow-y: auto;
   padding: 6px 10px;
   margin-top: 4px;
-  background: var(--thinking-bg);
-  border-left: 2px solid var(--thinking-border);
+  background: transparent;
+  border-left: 2px solid var(--border);
   border-radius: 0 4px 4px 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -346,9 +420,10 @@
 }
 
 .thinkingBody::-webkit-scrollbar-thumb {
-  background: var(--thinking-border);
+  background: var(--border);
   border-radius: 2px;
 }
+
 
 .breathCircle {
   display: flex;
@@ -437,9 +512,103 @@
 }
 
 .applyDone {
-  color: var(--success);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
+}
+
+/* ── 撤回按钮 ── */
+.revertBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  margin-left: auto;
+}
+
+.revertBtn:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
+/* ── 撤回确认弹窗（Cursor 风格）── */
+.revertOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.revertDialog {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 300px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.revertDialogTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+
+.revertDialogDesc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 18px;
+  line-height: 1.5;
+}
+
+.revertDialogActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.revertCancelBtn {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.revertCancelBtn:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+.revertConfirmBtn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.revertConfirmBtn:hover {
+  opacity: 0.85;
 }
 
 @keyframes spin {
@@ -496,16 +665,95 @@
   transform: translateY(0);
 }
 
-/* ── 结果溯源标注 ── */
+/* ── 活动步骤（类 Cursor 工具调用展示） ── */
 
-.provenanceBar {
-  padding: 4px 8px;
-  margin-top: 4px;
-  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+@keyframes activityShimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
 }
 
-.provenanceLabel {
+.activitiesSection {
+  padding: 4px 0 2px;
+}
+
+.activitiesToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.activitiesToggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.activitiesLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #999);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.activitiesArrow {
   font-size: 10px;
-  color: var(--text-tertiary, #555);
-  font-family: monospace;
+  color: var(--text-muted, #666);
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.activitiesArrowOpen {
+  transform: rotate(0deg);
+}
+
+.activitiesArrow:not(.activitiesArrowOpen) {
+  transform: rotate(-90deg);
+}
+
+.activitiesList {
+  padding: 2px 0 2px 8px;
+}
+
+.activityItem {
+  padding: 1px 0;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+}
+
+/* 流式过程中的炫光效果 */
+.activityItemStreaming {
+  background: linear-gradient(
+    90deg,
+    #666 20%,
+    #aaa 40%,
+    #ccc 50%,
+    #aaa 60%,
+    #666 80%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: activityShimmer 2s linear infinite;
+  display: inline-block;
+}
+
+.activityAction {
+  font-weight: 500;
+  color: var(--text-secondary, #999);
+}
+
+.activityName {
+  color: var(--text-muted, #666);
+}
+
+.activityPending {
+  color: var(--text-muted, #555);
+  font-style: normal;
+  opacity: 0.6;
 }

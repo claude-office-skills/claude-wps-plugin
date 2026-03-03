@@ -55,6 +55,14 @@
   line-height: 1.4;
 }
 
+.heartbeatDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 .headerActions {
   display: flex;
   align-items: center;
@@ -186,10 +194,10 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px 14px;
+  padding: 8px 14px 4px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -209,14 +217,14 @@
 /* 输入区 */
 .inputArea {
   flex-shrink: 0;
-  padding: 8px 14px 10px;
+  padding: 4px 14px 10px;
   background: var(--bg-surface);
   border-top: 1px solid var(--bg-elevated);
   display: flex;
   flex-direction: column;
   overflow: visible;
   position: relative;
-  gap: 8px;
+  gap: 6px;
 }
 
 .inputBox {
@@ -261,21 +269,23 @@
 }
 
 .inputBody {
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: 6px 10px 6px 14px;
   gap: 4px;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .inputChips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-height: 56px;
+  max-height: 64px;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .inputChips:empty {
@@ -337,12 +347,15 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .toolbarRight {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 /* Inline chips (inside input box) */
@@ -459,13 +472,14 @@
 }
 
 .stopBtn {
-  background: var(--error);
+  background: var(--accent);
   color: #fff;
-  animation: pulse 1.5s ease-in-out infinite;
+  filter: grayscale(35%) brightness(0.85);
 }
 
 .stopBtn:hover {
-  opacity: 0.85;
+  filter: grayscale(15%) brightness(0.95);
+  opacity: 1;
 }
 
 @keyframes pulse {

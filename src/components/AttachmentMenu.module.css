@@ -74,10 +74,12 @@
 }
 
 .menuIcon {
-  font-size: 13px;
   flex-shrink: 0;
   width: 20px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
 }
 
 .menuLabel {
@@ -102,9 +104,9 @@
 }
 
 .menuToggleOn {
-  background: var(--success);
-  border-color: var(--success);
-  color: #0d0d0d;
+  background: transparent;
+  border-color: var(--text-secondary);
+  color: var(--text-secondary);
 }
 
 .menuSoon {

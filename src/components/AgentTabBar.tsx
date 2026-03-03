@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { AgentState, AgentStatus } from "../types";
+import { AGENT_LABEL_MAP } from "../types";
 import styles from "./AgentTabBar.module.css";
 
 interface AgentTabBarProps {
@@ -18,6 +19,15 @@ const STATUS_COLORS: Record<AgentStatus, string> = {
 };
 
 function tabLabel(agent: AgentState): string {
+  if (agent.agentRef && AGENT_LABEL_MAP[agent.agentRef]) {
+    const prefix = AGENT_LABEL_MAP[agent.agentRef].short;
+    if (agent.name) {
+      const name =
+        agent.name.length > 7 ? agent.name.slice(0, 7) + "…" : agent.name;
+      return `${prefix}·${name}`;
+    }
+    return prefix;
+  }
   if (agent.name) {
     return agent.name.length > 10 ? agent.name.slice(0, 10) + "…" : agent.name;
   }
@@ -47,7 +57,10 @@ function AgentTabBar({
             >
               <span
                 className={`${styles.statusDot} ${isRunning ? styles.pulsing : ""}`}
-                style={{ backgroundColor: STATUS_COLORS[agent.status] }}
+                style={{
+                  backgroundColor:
+                    agent.agentColor || STATUS_COLORS[agent.status],
+                }}
               />
               <span className={styles.tabLabel}>{tabLabel(agent)}</span>
               {agents.length > 1 && (

@@ -1,3 +1,56 @@
+// ── Sidebar Block System (v2.3) ──
+
+export type SidebarBlockType =
+  | "code-js"
+  | "code-python"
+  | "code-html"
+  | "code-json"
+  | "terminal"
+  | "mcp-tool"
+  | "thinking"
+  | "plan-steps"
+  | "exec-result"
+  | "data-table"
+  | "cell-change"
+  | "chart-image"
+  | "skill-create"
+  | "memory"
+  | "progress"
+  | "approval"
+  | "reference";
+
+export type BlockStatus = "idle" | "running" | "success" | "error";
+
+export interface BlockAction {
+  id: string;
+  label: string;
+  icon?: string;
+  variant?: "primary" | "danger" | "muted";
+  onClick?: () => void;
+}
+
+export interface SidebarBlockData {
+  id: string;
+  type: SidebarBlockType;
+  status: BlockStatus;
+  title?: string;
+  language?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  actions?: BlockAction[];
+}
+
+// ── Plan Step States (v2.3) ──
+
+export type PlanStepStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "failed"
+  | "skipped";
+
+// ── Core Types ──
+
 export type MessageRole = "user" | "assistant" | "system";
 
 export type InteractionMode = "agent" | "plan" | "ask";
@@ -26,6 +79,10 @@ export interface PlanStep {
   index: number;
   text: string;
   done: boolean;
+  status?: PlanStepStatus;
+  codeBlockId?: string;
+  result?: string;
+  error?: string;
 }
 
 export interface Provenance {
@@ -34,6 +91,12 @@ export interface Provenance {
   skillsLoaded?: string[];
   promptSummary?: string;
   timestamp?: number;
+}
+
+export interface ActivityEvent {
+  action: string;
+  name: string;
+  timestamp: number;
 }
 
 export interface ChatMessage {
@@ -50,6 +113,7 @@ export interface ChatMessage {
   planSteps?: PlanStep[];
   provenance?: Provenance;
   isAutoContinue?: boolean;
+  activities?: ActivityEvent[];
 }
 
 export interface CodeBlock {
@@ -62,6 +126,24 @@ export interface CodeBlock {
   diff?: DiffResult | null;
 }
 
+export interface AgentDefinition {
+  name: string;
+  description: string;
+  model: string;
+  color: string;
+  tools: string[];
+}
+
+export const AGENT_LABEL_MAP: Record<string, { full: string; short: string }> =
+  {
+    "excel-analyst": { full: "数据分析师", short: "分析师" },
+    "chart-designer": { full: "可视化专家", short: "可视化" },
+    "formula-expert": { full: "公式专家", short: "公式" },
+    "data-cleaner": { full: "数据清洗师", short: "清洗" },
+    "report-writer": { full: "报告撰写师", short: "报告" },
+    "quality-checker": { full: "质量审查官", short: "审查" },
+  };
+
 export interface AgentState {
   id: string;
   name: string;
@@ -72,6 +154,8 @@ export interface AgentState {
   createdAt: number;
   updatedAt: number;
   error?: string;
+  agentRef?: string;
+  agentColor?: string;
 }
 
 export interface SelectionContext {
@@ -104,6 +188,8 @@ export interface ModelOption {
   label: string;
   description: string;
   cliModel: string;
+  tier: "lightweight" | "mainstay" | "reasoning";
+  costRatio: string;
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
@@ -111,21 +197,33 @@ export const MODEL_OPTIONS: ModelOption[] = [
     id: "sonnet",
     label: "Sonnet 4.6",
     description: "最佳编程模型，速度与质量兼顾",
-    cliModel: "claude-sonnet-4-6",
+    cliModel: "sonnet",
+    tier: "mainstay",
+    costRatio: "1x",
   },
   {
     id: "opus",
     label: "Opus 4.6",
     description: "最强推理能力，适合复杂分析",
-    cliModel: "claude-opus-4-6",
+    cliModel: "opus",
+    tier: "reasoning",
+    costRatio: "5x",
   },
   {
     id: "haiku",
     label: "Haiku 4.5",
     description: "极速响应，轻量任务首选",
-    cliModel: "claude-haiku-4-5",
+    cliModel: "haiku",
+    tier: "lightweight",
+    costRatio: "0.3x",
   },
 ];
+
+export interface ModelRouteInfo {
+  model: string;
+  reason: string;
+  isAutoRouted: boolean;
+}
 
 export interface AttachmentFile {
   name: string;

@@ -11,14 +11,24 @@ import ThemeToggle from "./components/ThemeToggle";
 import AgentTabBar from "./components/AgentTabBar";
 import AgentListPanel from "./components/AgentListPanel";
 import UpdateNotification from "./components/UpdateNotification";
+import LongTaskPanel from "./components/LongTaskPanel";
+import TeamTaskBoard from "./components/TeamTaskBoard";
+import SlashCommandPopup from "./components/SlashCommandPopup";
+import AtContextPopup from "./components/AtContextPopup";
+import { Onboarding, useOnboardingStatus } from "./components/Onboarding";
 import { useTheme } from "./hooks/useTheme";
 import { useAgentManager } from "./hooks/useAgentManager";
+import { useLongTask } from "./hooks/useLongTask";
 import { sendMessage, extractCodeBlocks, checkProxy } from "./api/claudeClient";
+import { analytics } from "./api/analytics";
 import {
   getWpsContext,
   onSelectionChange,
   isWpsAvailable,
   executeCode,
+  executePython,
+  executeShell,
+  previewHtml,
   pollAddToChat,
 } from "./api/wpsAdapter";
 import {
@@ -35,6 +45,7 @@ import type {
   AttachmentFile,
   InteractionMode,
   PlanStep,
+  ActivityEvent,
 } from "./types";
 import styles from "./App.module.css";
 
@@ -56,6 +67,8 @@ function parsePlanSteps(text: string, mode: string): PlanStep[] | undefined {
 
 export default function App() {
   const { theme, cycleTheme } = useTheme();
+  const onboardingStatus = useOnboardingStatus();
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const agentMgr = useAgentManager();
   const {
     agents,
@@ -71,6 +84,7 @@ export default function App() {
     setActiveName,
     setActiveMode,
     setActiveModel,
+    setActiveAgentRef,
     createAbortController,
     abortAgent,
     canStartRequest,
@@ -82,12 +96,35 @@ export default function App() {
   const currentMode = activeAgent.mode;
   const selectedModel = activeAgent.model;
 
+  const longTask = useLongTask();
+  const [teamTask, setTeamTask] = useState<{
+    id: string;
+    goal: string;
+    status: "running" | "done" | "failed";
+    subtasks: Array<{
+      id: string;
+      agent: string;
+      agentColor: string;
+      description: string;
+      status: "pending" | "running" | "done" | "failed";
+      result?: string;
+    }>;
+  } | null>(null);
+
   const [input, setInput] = useState("");
   const [wpsCtx, setWpsCtx] = useState<WpsContext | null>(null);
   const [proxyMissing, setProxyMissing] = useState(false);
+  const [heartbeatOk, setHeartbeatOk] = useState<boolean | null>(null);
   const [applyingMsgId, setApplyingMsgId] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachmentFile[]>([]);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem("wps-claude-webSearch");
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
   const [pinnedSelection, setPinnedSelection] = useState<{
     label: string;
     address: string;
@@ -95,6 +132,15 @@ export default function App() {
     rowCount: number;
     colCount: number;
   } | null>(null);
+
+  const [slashPopup, setSlashPopup] = useState<{
+    visible: boolean;
+    filter: string;
+  }>({ visible: false, filter: "" });
+  const [atPopup, setAtPopup] = useState<{
+    visible: boolean;
+    filter: string;
+  }>({ visible: false, filter: "" });
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentListOpen, setAgentListOpen] = useState(true);
@@ -156,13 +202,14 @@ export default function App() {
 
   const loading = activeAgent.status === "running";
 
-  const [inputBoxHeight, setInputBoxHeight] = useState(120);
+  const [inputBoxHeight, setInputBoxHeight] = useState(148);
   const lastSentInputRef = useRef<string>("");
   const autoContinueRoundRef = useRef(0);
   const maxAutoContinueRef = useRef(3);
   const MAX_AUTO_CONTINUE_HARD_CAP = 8;
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const _lastProxyPasteTs = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragStartRef = useRef<{ y: number; h: number } | null>(null);
 
@@ -194,6 +241,39 @@ export default function App() {
       const ok = await checkProxy();
       setProxyMissing(!ok);
       timer = setTimeout(poll, ok ? 30000 : 3000);
+    };
+
+    poll();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  // v2.2.0: Onboarding detection
+  useEffect(() => {
+    if (onboardingStatus.loaded && !onboardingStatus.onboarded) {
+      setShowOnboarding(true);
+    }
+  }, [onboardingStatus.loaded, onboardingStatus.onboarded]);
+
+  // v2.2.0 心跳状态轮询（15s 一次，通过 /health/v2）
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+    const PROXY_BASE = "http://127.0.0.1:3001";
+
+    const poll = async () => {
+      if (stopped) return;
+      try {
+        const resp = await fetch(`${PROXY_BASE}/health/v2`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        setHeartbeatOk(resp.ok);
+      } catch {
+        setHeartbeatOk(false);
+      }
+      timer = setTimeout(poll, 15_000);
     };
 
     poll();
@@ -332,12 +412,20 @@ export default function App() {
     return () => document.removeEventListener("keydown", handleSidebarToggle);
   }, []);
 
-  // 自动滚动到底部 — 流式时直接跳转，非流式时平滑
+  // 自动滚动：新用户消息 → 滚动到该消息位置（顶部对齐）；流式响应 → 滚动到底部
+  const prevMsgCountRef = useRef(0);
   useEffect(() => {
     const isStreaming = messages.some((m) => m.isStreaming);
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user" && !m.isAutoContinue);
+    const msgCountGrew = messages.length > prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
+
     if (isStreaming) {
       const container = bottomRef.current?.parentElement;
       if (container) container.scrollTop = container.scrollHeight;
+    } else if (msgCountGrew && lastUserMsg) {
+      const el = document.querySelector(`[data-msg-id="${lastUserMsg.id}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
@@ -359,7 +447,29 @@ export default function App() {
               ? { ...b, executed: true, result, error, diff }
               : b,
           );
-          return { ...msg, codeBlocks: updatedBlocks };
+          // Inject local.* action as an activity so it appears in sidebar
+          const block = msg.codeBlocks?.find((b) => b.id === blockId);
+          const isLocalJson =
+            block?.language?.toLowerCase() === "json" &&
+            block.code?.trim().startsWith('{"_action"');
+          let extraActivity: ActivityEvent | null = null;
+          if (isLocalJson && !error) {
+            try {
+              const parsed = JSON.parse(block!.code);
+              extraActivity = {
+                action: "local_action",
+                name: parsed._action || "local",
+                timestamp: Date.now(),
+              };
+            } catch {}
+          }
+          return {
+            ...msg,
+            codeBlocks: updatedBlocks,
+            activities: extraActivity
+              ? [...(msg.activities ?? []), extraActivity]
+              : msg.activities,
+          };
         }),
       );
     },
@@ -378,8 +488,23 @@ export default function App() {
       setApplyingMsgId(msgId);
 
       for (const block of blocks) {
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'eab716'},body:JSON.stringify({sessionId:'eab716',location:'App.tsx:handleApplyCode',message:'block exec with lang routing',data:{blockId:block.id,language:block.language,codeStart:block.code.slice(0,80)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         try {
-          const { result, diff } = await executeCode(block.code, activeAgentId);
+          const lang = (block.language || "javascript").toLowerCase();
+          const isShell = ["bash","shell","sh","zsh","terminal"].includes(lang);
+          let execResult: { result: string; diff?: import("./types").DiffResult | null };
+          if (lang === "python" || lang === "py") {
+            execResult = await executePython(block.code);
+          } else if (isShell) {
+            execResult = await executeShell(block.code);
+          } else if (lang === "html" || lang === "htm") {
+            execResult = await previewHtml(block.code);
+          } else {
+            execResult = await executeCode(block.code, activeAgentId);
+          }
+          const { result, diff } = execResult;
           updateActiveMessages((prev) =>
             prev.map((m) => {
               if (m.id !== msgId) return m;
@@ -479,9 +604,10 @@ ${code}
 
   const handleModeChange = useCallback(
     (mode: InteractionMode) => {
+      analytics.modeChange(activeAgent?.mode ?? "unknown", mode);
       setActiveMode(mode);
     },
-    [setActiveMode],
+    [setActiveMode, activeAgent],
   );
 
   const handleFileAttach = useCallback((file: AttachmentFile) => {
@@ -496,8 +622,26 @@ ${code}
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      if (e.target.value.length <= MAX_INPUT_LENGTH) {
-        setInput(e.target.value);
+      const val = e.target.value;
+      if (val.length > MAX_INPUT_LENGTH) return;
+      setInput(val);
+
+      const showSlash = val.startsWith("/") && !val.includes(" ");
+      const atMatch = val.match(/@(\S*)$/);
+      const showAt = !!(atMatch && val.endsWith(atMatch[0]));
+
+      if (showAt) {
+        setAtPopup({ visible: true, filter: atMatch![1] });
+        setSlashPopup({ visible: false, filter: "" });
+      } else if (showSlash) {
+        setSlashPopup({
+          visible: true,
+          filter: val === "/" ? "" : val.slice(1),
+        });
+        setAtPopup({ visible: false, filter: "" });
+      } else {
+        setSlashPopup({ visible: false, filter: "" });
+        setAtPopup({ visible: false, filter: "" });
       }
     },
     [],
@@ -508,12 +652,34 @@ ${code}
   }, []);
 
   const handleToggleWebSearch = useCallback(() => {
-    setWebSearchEnabled((v) => !v);
+    setWebSearchEnabled((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("wps-claude-webSearch", String(next));
+      } catch {}
+      return next;
+    });
   }, []);
 
   const handleSendClick = useCallback(() => {
     handleSendRef.current();
   }, []);
+
+  /** 点击历史用户消息重新提交：截断该消息之后的所有消息，然后重发 */
+  const handleResubmit = useCallback(
+    (msgId: string, content: string) => {
+      if (loading) return;
+      updateActiveMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === msgId);
+        if (idx < 0) return prev;
+        // 保留该 user 消息之前的所有消息（不含本条）
+        return prev.slice(0, idx);
+      });
+      // 用截断后的上下文重新发送
+      setTimeout(() => handleSendRef.current(content), 0);
+    },
+    [loading, updateActiveMessages],
+  );
 
   const handleOpenHistory = useCallback(() => {
     setHistoryOpen(true);
@@ -554,20 +720,209 @@ ${code}
     [setActiveMode],
   );
 
-  const handleSend = async (text?: string, _autoContinue?: boolean) => {
+  const handleSend = async (
+    text?: string,
+    _autoContinue?: boolean,
+    _displayOverride?: string,
+  ) => {
     const userText = (text ?? input).trim();
     if (!userText || (loading && !_autoContinue)) return;
+
+    // #region debug command
+    if (userText === "/debug-storage") {
+      setInput("");
+      try {
+        const storageKey = "wps-claude-agents-v2";
+        const raw = localStorage.getItem(storageKey);
+        const persistDebug = localStorage.getItem("wps-claude-persist-debug");
+        const loadDebug = localStorage.getItem("wps-claude-load-debug");
+        const pd = persistDebug ? JSON.parse(persistDebug) : null;
+        const ld = loadDebug ? JSON.parse(loadDebug) : null;
+        const agentCount = raw ? (JSON.parse(raw)?.agents?.length ?? 0) : 0;
+        const info = [
+          `📦 存储调试报告`,
+          `主存储: ${raw ? `${raw.length} 字节, ${agentCount} 个对话` : "❌ 无数据"}`,
+          `上次保存: ${pd ? `${new Date(pd.ts).toLocaleTimeString()} | ${pd.agentCount} 个对话 | ${pd.payloadBytes} 字节${pd.fallback ? " ⚠️ 降级保存(只保存当前)" : ""}` : "无记录"}`,
+          `上次加载: ${ld ? `${new Date(ld.ts).toLocaleTimeString()} | 找到数据: ${ld.found} | ${ld.rawBytes} 字节` : "无记录"}`,
+        ].join("\n");
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: `dbg-${Date.now()}`,
+            role: "user" as const,
+            content: "/debug-storage",
+            timestamp: Date.now(),
+          },
+          {
+            id: `dbg-r-${Date.now()}`,
+            role: "assistant" as const,
+            content: info,
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (e) {
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: `dbg-err-${Date.now()}`,
+            role: "assistant" as const,
+            content: `调试出错: ${e}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      return;
+    }
+    // #endregion debug command
+
+    // ── 斜杠命令: /workflow <name> [inputs] ──
+    const workflowMatch = userText.match(/^\/workflow\s+(\S+)(?:\s+(.*))?$/i);
+    if (workflowMatch) {
+      setInput("");
+      const wfName = workflowMatch[1];
+      const wfInputsRaw = workflowMatch[2];
+      let wfInputs: Record<string, unknown> = {};
+      try {
+        if (wfInputsRaw) wfInputs = JSON.parse(wfInputsRaw);
+      } catch {}
+      updateActiveMessages((prev) => [
+        ...prev,
+        {
+          id: nanoid(),
+          role: "user",
+          content: userText,
+          timestamp: Date.now(),
+        },
+        {
+          id: nanoid(),
+          role: "assistant",
+          content: `⏳ 正在启动工作流 **${wfName}**...`,
+          timestamp: Date.now(),
+        },
+      ]);
+      try {
+        await longTask.startWorkflow(
+          `skills/workflows/${wfName}/workflow.yaml`,
+          wfInputs,
+        );
+      } catch (err) {
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: nanoid(),
+            role: "assistant",
+            content: `❌ 工作流启动失败: ${err instanceof Error ? err.message : String(err)}`,
+            timestamp: Date.now(),
+            isError: true,
+          },
+        ]);
+      }
+      return;
+    }
+
+    // ── 斜杠命令: /team <goal> ──
+    const teamMatch = userText.match(/^\/team\s+(.+)$/i);
+    if (teamMatch) {
+      setInput("");
+      const goal = teamMatch[1].trim();
+      updateActiveMessages((prev) => [
+        ...prev,
+        {
+          id: nanoid(),
+          role: "user",
+          content: userText,
+          timestamp: Date.now(),
+        },
+        {
+          id: nanoid(),
+          role: "assistant",
+          content: `🤝 正在组建 Agent 团队来处理: **${goal}**\n\n正在分析任务并分派子任务...`,
+          timestamp: Date.now(),
+        },
+      ]);
+      try {
+        const resp = await fetch("http://127.0.0.1:3001/v3/team/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ goal, context: wpsCtx }),
+        });
+        const data = await resp.json();
+        if (data.ok && data.team) {
+          setTeamTask(data.team);
+        }
+      } catch (err) {
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: nanoid(),
+            role: "assistant",
+            content: `❌ 团队启动失败: ${err instanceof Error ? err.message : String(err)}`,
+            timestamp: Date.now(),
+            isError: true,
+          },
+        ]);
+      }
+      return;
+    }
+
+    // ── 斜杠命令: /help ──
+    if (userText === "/help") {
+      setInput("");
+      updateActiveMessages((prev) => [
+        ...prev,
+        { id: nanoid(), role: "user", content: "/help", timestamp: Date.now() },
+        {
+          id: nanoid(),
+          role: "assistant",
+          content: [
+            "## 可用命令",
+            "",
+            "| 命令 | 说明 |",
+            "|------|------|",
+            "| `/team <目标>` | 组建 Agent 团队协作完成复杂任务 |",
+            "| `/workflow <名称>` | 启动预定义工作流（如 monthly-report） |",
+            "| `/help` | 显示此帮助信息 |",
+            "",
+            "**示例:**",
+            "- `/team 分析这份销售数据，清洗后做可视化报告`",
+            "- `/workflow monthly-report`",
+            "",
+            "💡 **提示**: 发送复杂请求时，AI 会自动建议使用团队模式。",
+          ].join("\n"),
+          timestamp: Date.now(),
+        },
+      ]);
+      return;
+    }
+
     if (!_autoContinue) {
       autoContinueRoundRef.current = 0;
       const COMPLEX_TASK =
         /dcf|估值|建模|财务模型|完整.*模型|多.*sheet|多.*表|分析.*报告|全面|comprehensive/i;
       const MEDIUM_TASK = /图表|chart|可视化|dashboard|仪表盘|对比.*分析|趋势/i;
+      const TEAM_SUGGEST =
+        /清洗.*可视化|分析.*报告.*图表|多步.*流程|数据.*清洗.*分析|全面.*报告|整理.*分析.*汇报/i;
       if (COMPLEX_TASK.test(userText)) {
         maxAutoContinueRef.current = MAX_AUTO_CONTINUE_HARD_CAP;
       } else if (MEDIUM_TASK.test(userText)) {
         maxAutoContinueRef.current = 4;
       } else {
         maxAutoContinueRef.current = 2;
+      }
+
+      if (TEAM_SUGGEST.test(userText) && !teamTask) {
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            id: `team-hint-${Date.now()}`,
+            role: "assistant",
+            content:
+              "💡 **提示**: 这个任务涉及多个专业领域。你可以使用 `/team " +
+              userText.slice(0, 50) +
+              "` 来让多个专业 Agent 协作完成，效果更好。\n\n当前会继续以单 Agent 模式执行。",
+            timestamp: Date.now(),
+          },
+        ]);
       }
     }
 
@@ -593,7 +948,7 @@ ${code}
     setAttachedFiles([]);
     setPinnedSelection(null);
 
-    let displayContent = userText;
+    let displayContent = _displayOverride || userText;
     if (currentPinned) {
       displayContent += `\n\n📎 引用选区: ${currentPinned.label}（${currentPinned.rowCount} 行 × ${currentPinned.colCount} 列）`;
     }
@@ -647,6 +1002,8 @@ ${code}
     const modeSnapshot = currentMode;
     const modelSnapshot = selectedModel;
 
+    analytics.chatSend(modeSnapshot, modelSnapshot);
+
     try {
       await sendMessage(
         userText,
@@ -678,6 +1035,20 @@ ${code}
                 m.id === assistantMsgId ? { ...m, ...updates } : m,
               ),
             );
+          },
+          onActivity: (activity: ActivityEvent) => {
+            if (aborted) return;
+            updateAgentMessages(agentId, (prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, activities: [...(m.activities ?? []), activity] }
+                  : m,
+              ),
+            );
+          },
+          onAgentInfo: (info) => {
+            if (aborted) return;
+            setActiveAgentRef(info.name, info.color);
           },
           onComplete: async (text, provenance, flags) => {
             if (aborted) return;
@@ -728,33 +1099,6 @@ ${code}
               language: b.language,
               code: b.code,
             }));
-            // #region agent log
-            fetch(
-              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Debug-Session-Id": "716a17",
-                },
-                body: JSON.stringify({
-                  sessionId: "716a17",
-                  location: "App.tsx:onComplete",
-                  message: "AI response parsed",
-                  data: {
-                    codeBlockCount: codeBlocks.length,
-                    tokenLimitHit: flags?.tokenLimitHit,
-                    round: autoContinueRoundRef.current,
-                    maxRound: maxAutoContinueRef.current,
-                    textLen: text.length,
-                    textPreview: text.slice(0, 200),
-                  },
-                  timestamp: Date.now(),
-                  hypothesisId: "H2",
-                }),
-              },
-            ).catch(() => {});
-            // #endregion
 
             const planSteps = parsePlanSteps(text, modeSnapshot);
 
@@ -792,16 +1136,28 @@ ${code}
               await handleSend(
                 `[输出被截断 ${round}/${maxAutoContinueRef.current}] 你的回复超出了 token 限制被截断了。\n原始任务: ${originalUserMsg}\n请从断点继续，每次只输出 1 个代码块。`,
                 true,
+                `[输出被截断] 自动从断点继续...`,
               );
               return;
             }
 
-            if (shouldAutoExecute && codeBlocks.length > 0) {
+            // 只自动执行 JS 和 JSON action；Shell/Python/HTML 需要用户手动确认
+            const CONFIRM_LANGS = ["bash","shell","sh","zsh","terminal","python","py","html","htm"];
+            const execBlocks = codeBlocks.filter(
+              (b) => {
+                const lang = (b.language || "").toLowerCase();
+                if (CONFIRM_LANGS.includes(lang)) return false;
+                if (lang === "json" && !b.code.trim().startsWith('{"_action"')) return false;
+                return true;
+              },
+            );
+
+            if (shouldAutoExecute && execBlocks.length > 0) {
               setApplyingMsgId(assistantMsgId);
               const execResults: string[] = [];
               let execFailed = false;
-              for (let _bi = 0; _bi < codeBlocks.length; _bi++) {
-                const block = codeBlocks[_bi];
+              for (let _bi = 0; _bi < execBlocks.length; _bi++) {
+                const block = execBlocks[_bi];
                 try {
                   const { result, diff } = await executeCode(
                     block.code,
@@ -864,33 +1220,8 @@ ${code}
                     sheetList = freshCtx.sheetNames.join(", ");
                   }
                 } catch {}
-                // #region agent log
-                fetch(
-                  "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "X-Debug-Session-Id": "716a17",
-                    },
-                    body: JSON.stringify({
-                      sessionId: "716a17",
-                      location: "App.tsx:autoContinue",
-                      message: "auto-continue decision",
-                      data: {
-                        round,
-                        maxRound,
-                        execResults,
-                        originalUserMsg,
-                        sheetList,
-                      },
-                      timestamp: Date.now(),
-                      hypothesisId: "H1",
-                    }),
-                  },
-                ).catch(() => {});
-                // #endregion
-                const contText =
+                const displayText = `[执行结果]\n${execResults.join("\n")}`;
+                const promptText =
                   `[执行结果 ${round}/${maxRound}]\n${execResults.join("\n")}\n\n` +
                   `原始任务: ${originalUserMsg}\n` +
                   (sheetList ? `当前工作簿的 Sheet: ${sheetList}\n` : "") +
@@ -899,7 +1230,7 @@ ${code}
                   `- 如果还有必要的后续步骤，继续下一步（输出 1 个代码块）\n` +
                   `引用 Sheet 时必须使用上面列出的准确表名。`;
                 setAgentStatus(agentId, "idle");
-                await handleSend(contText, true);
+                await handleSend(promptText, true, displayText);
                 return;
               }
               if (execFailed) {
@@ -935,6 +1266,7 @@ ${code}
         {
           model: modelSnapshot,
           mode: modeSnapshot,
+          agentName: activeAgent.agentRef,
           attachments:
             currentAttachments.length > 0 ? currentAttachments : undefined,
           signal: controller.signal,
@@ -1013,6 +1345,11 @@ ${code}
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // WPS WebView: keydown preventDefault 不阻止 paste 事件，用时间戳去重
+    if (Date.now() - _lastProxyPasteTs.current < 500) {
+      e.preventDefault();
+      return;
+    }
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
@@ -1149,7 +1486,62 @@ ${code}
     }
   };
 
+  const handleSlashSelect = useCallback(
+    (cmd: {
+      prompt: string;
+      label: string;
+      isSystem?: boolean;
+      inputTemplate?: string;
+    }) => {
+      setSlashPopup({ visible: false, filter: "" });
+      if (cmd.isSystem && cmd.inputTemplate) {
+        const tpl = cmd.inputTemplate;
+        // /help 这类不需要补参数的命令直接执行
+        if (!tpl.endsWith(" ")) {
+          setInput("");
+          handleSendRef.current(tpl);
+        } else {
+          // /team 、/workflow 等需要补参数的命令：填入输入框等用户补充
+          setInput(tpl);
+          requestAnimationFrame(() => {
+            const ta = textareaRef.current;
+            if (ta) {
+              ta.focus();
+              ta.setSelectionRange(tpl.length, tpl.length);
+            }
+          });
+        }
+      } else {
+        setInput("");
+        handleSendRef.current(cmd.prompt);
+      }
+    },
+    [],
+  );
+
+  const handleAtSelect = useCallback((opt: { insertText: string }) => {
+    setAtPopup({ visible: false, filter: "" });
+    setInput((prev) => {
+      const atIdx = prev.lastIndexOf("@");
+      return atIdx >= 0
+        ? prev.slice(0, atIdx) + opt.insertText + " "
+        : prev + opt.insertText + " ";
+    });
+    textareaRef.current?.focus();
+  }, []);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashPopup.visible || atPopup.visible) {
+      if (["ArrowDown", "ArrowUp", "Tab"].includes(e.key)) return;
+      if (e.key === "Enter" && !e.shiftKey) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashPopup({ visible: false, filter: "" });
+        setAtPopup({ visible: false, filter: "" });
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1160,6 +1552,7 @@ ${code}
 
     if (e.key === "v") {
       e.preventDefault();
+      _lastProxyPasteTs.current = Date.now();
       pasteViaProxy();
       return;
     }
@@ -1213,7 +1606,10 @@ ${code}
       const delta = dragStartRef.current.y - ev.clientY;
       const colH = chatColumnRef.current?.clientHeight ?? 600;
       const maxH = Math.min(400, colH * 0.45);
-      const next = Math.max(80, Math.min(maxH, dragStartRef.current.h + delta));
+      const next = Math.max(
+        110,
+        Math.min(maxH, dragStartRef.current.h + delta),
+      );
       setInputBoxHeight(next);
     };
     const onUp = () => {
@@ -1227,6 +1623,14 @@ ${code}
 
   return (
     <div className={styles.shell}>
+      {/* v2.2.0: Onboarding */}
+      {showOnboarding && (
+        <Onboarding
+          onComplete={() => {
+            setShowOnboarding(false);
+          }}
+        />
+      )}
       {/* 顶部 Header */}
       <header className={styles.header}>
         <div className={styles.logoRow}>
@@ -1234,7 +1638,14 @@ ${code}
             <Claude.Color size={20} />
           </div>
           <div className={styles.logoName}>Claude for Excel</div>
-          <span className={styles.betaBadge}>v 1.0</span>
+          <span className={styles.betaBadge}>v 2.2.0</span>
+          {heartbeatOk !== null && (
+            <span
+              className={styles.heartbeatDot}
+              style={{ background: heartbeatOk ? "var(--accent)" : "#999" }}
+              title={heartbeatOk ? "服务运行正常" : "心跳检测失败"}
+            />
+          )}
         </div>
         <div className={styles.headerActions}>
           <button
@@ -1322,19 +1733,45 @@ ${code}
 
           {/* 消息列表 */}
           <div className={styles.chatArea}>
-            {messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                onCodeExecuted={handleCodeExecuted}
-                onApplyCode={handleApplyCode}
-                onRetryFix={handleRetryFix}
-                isApplying={applyingMsgId === msg.id}
-                onSwitchToAgent={handleSwitchToAgent}
-                onPlanStepsChange={handlePlanStepsChange}
-                onConfirmPlan={handleConfirmPlan}
+            {(() => {
+              // 找出最后一条非 autoContinue 的 user 消息 id（用于 sticky 吸顶）
+              const lastUserMsgId = [...messages]
+                .reverse()
+                .find((m) => m.role === "user" && !m.isAutoContinue)?.id;
+              return messages.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onCodeExecuted={handleCodeExecuted}
+                  onApplyCode={handleApplyCode}
+                  onRetryFix={handleRetryFix}
+                  isApplying={applyingMsgId === msg.id}
+                  onSwitchToAgent={handleSwitchToAgent}
+                  onPlanStepsChange={handlePlanStepsChange}
+                  onConfirmPlan={handleConfirmPlan}
+                  onResubmit={!loading ? handleResubmit : undefined}
+                  isLatestUser={msg.id === lastUserMsgId}
+                />
+              ));
+            })()}
+
+            {/* 长任务进度面板 */}
+            {longTask.task.status !== "idle" && (
+              <LongTaskPanel
+                task={longTask.task}
+                onAbort={longTask.abort}
+                onReset={longTask.reset}
               />
-            ))}
+            )}
+
+            {/* Agent 团队任务面板 */}
+            {teamTask && (
+              <TeamTaskBoard
+                team={teamTask}
+                onDismiss={() => setTeamTask(null)}
+              />
+            )}
+
             <div ref={bottomRef} />
           </div>
 
@@ -1410,6 +1847,23 @@ ${code}
                   ))}
                 </div>
 
+                {/* / 指令弹窗 */}
+                <SlashCommandPopup
+                  visible={slashPopup.visible}
+                  filter={slashPopup.filter}
+                  onSelect={handleSlashSelect}
+                  onClose={() => setSlashPopup({ visible: false, filter: "" })}
+                />
+
+                {/* @ 上下文引用弹窗 */}
+                <AtContextPopup
+                  visible={atPopup.visible}
+                  filter={atPopup.filter}
+                  wpsCtx={wpsCtx}
+                  onSelect={handleAtSelect}
+                  onClose={() => setAtPopup({ visible: false, filter: "" })}
+                />
+
                 {/* 文本输入 */}
                 <textarea
                   ref={textareaRef}
@@ -1421,7 +1875,7 @@ ${code}
                   placeholder={
                     pinnedSelection || attachedFiles.length > 0
                       ? "描述你想做什么..."
-                      : "发个指令...（Enter 发送，Shift+Enter 换行）"
+                      : "发个指令...（/ 指令 · @ 引用 · Enter 发送）"
                   }
                   rows={1}
                   disabled={loading}

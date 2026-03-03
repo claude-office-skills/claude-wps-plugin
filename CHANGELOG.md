@@ -2,6 +2,52 @@
 
 All notable changes to Claude for WPS Excel will be documented in this file.
 
+## [2.2.0] - 2026-03-03
+
+### Added
+- **Agent Team 系统**（`lib/agent-team.js`）：多 Agent 协作执行复杂任务，`/team` 命令入口
+- **Long Task Manager**（`lib/long-task-manager.js`）：后台长任务执行 + SSE 进度推送 + `LongTaskPanel` 前端面板
+- **Hook Engine**（`lib/hook-engine.js`）：`PreCodeExecute` / `PostCodeExecute` / `PreAgentDispatch` 等生命周期钩子
+- **Agent Loader & Dispatcher**（`lib/agent-loader.js`, `lib/agent-dispatcher.js`）：Markdown Agent 定义 + YAML Frontmatter 解析 + 动态分发
+- **Model Router**（`lib/model-router.js`）：按任务类型动态选择模型
+- **Capability Resolver**（`lib/capability-resolver.js`）：Agent 能力解析
+- **"万物皆可代码"执行体系**：统一 JSON Action / Shell / Python / HTML 执行管道
+  - `lib/actions/local.js`：本地系统操作（浏览器、剪贴板、日历、Finder 等）
+  - `lib/actions/ai.js`：AI 辅助操作
+  - `lib/actions/terminal.js`：终端命令执行
+  - `lib/actions/mcp.js`：MCP 工具调用
+- **Slash Command 弹窗**（`SlashCommandPopup.tsx`）：`/` 触发命令选择，含系统命令（`/team` `/workflow` `/help`）
+- **@ Context 弹窗**（`AtContextPopup.tsx`）：`@` 引用 Sheet / 选区 / 全表上下文
+- **代码执行授权确认**：Shell / Python 代码 Cursor 风格确认栏（盾牌图标 + "需要授权 · 允许执行"）
+- **动态操作反馈标签**：底部操作按钮根据代码类型动态显示（"执行 Python" / "执行命令" / "打开网页"等）
+- **SidebarBlock 统一区块系统**（`SidebarBlock.tsx` + `blockConfig.ts`）：15+ 区块类型统一视觉语言
+- **Block Renderers**：`ThinkingRenderer` / `CodeRenderer` / `PlanRenderer` / `TableRenderer` / `ToolCallRenderer` 等
+- **AgentEffects 组件**：Agent 运行状态动效
+- **TeamTaskBoard 组件**：Team 任务看板
+- **Onboarding 引导流程**
+- **Analytics 埋点**（`src/api/analytics.ts`）
+- **Provision Panel**（`ProvisionPanel.tsx`）：资源配置面板
+- **E2E 测试**：Playwright 测试 + 单元测试覆盖
+
+### Changed
+- **附件菜单优化**：Emoji 替换为线框 SVG 图标（📎→PaperclipIcon, 🌐→GlobeIcon, ◇→LinkIcon），选中态去掉绿色背景
+- **Thinking 样式优化**：移除 ◐ 图标，背景从 `--thinking-bg`(`#141414`) 改为 `--bg-base`(`#1a1a1a`)
+- **Slash/At 弹窗设计规范化**：线框图标 + 去掉字体颜色 + 点击外部收起 + 删除触发字符收起
+- **System Prompt 架构升级**："万物皆可代码 — 执行能力总览"统一能力声明
+- **Claude CLI 安全策略**：添加 `--disallowedTools Bash,Write,Edit` + `--effort` 动态调整
+- **Shell 安全模型**：白名单改为黑名单（`SHELL_DENY_LIST`）
+- **handleApplyCode 语言路由**：消息级执行按钮根据 block.language 路由到 `executePython` / `executeShell` / `previewHtml` / `executeCode`
+
+### Fixed
+- **Python 代码执行**：`handleApplyCode` 不区分语言导致 Python 被当 JavaScript 执行（"Cannot use import statement outside a module"）
+- **粘贴重复**：WPS WebView 中 Ctrl+V 触发重复粘贴（时间戳去重方案）
+- **Thinking 过久**：简单指令触发复杂推理（`--effort low` + 效率原则 prompt）
+- **吸顶重叠**：多条用户消息 sticky 重叠（移除 wrapper div + `data-msg-id` 定位滚动）
+- **JSON Action 执行失败**：`local.browser.open` 的 `about:blank` 无效 + catch 块 fallthrough 到 JS 执行
+- **`prominence` undefined**：`code-json` 类型缺少 blockConfig 定义
+- **proxy-server TDZ 崩溃**：debug log 引用 `cliArgs` 在声明前导致 ReferenceError
+- **preHook ReferenceError**：`force=true` 时访问未定义的 `preHook` 变量
+
 ## [2.1.0] - 2026-02-28
 
 ### Added

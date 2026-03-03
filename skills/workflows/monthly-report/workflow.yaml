@@ -1,0 +1,48 @@
+# 月报自动化工作流
+# 触发方式：手动（在对话中输入 /workflow monthly-report）或每月第一个工作日早上 9 点
+name: monthly-report
+description: "读取本地 Excel 数据 → AI 生成分析报告 → 发飞书/邮件通知"
+
+trigger:
+  type: manual
+  # 取消下面注释可开启定时触发（每月 1 日 09:00，工作日）
+  # type: cron
+  # schedule: "0 9 1 * *"
+  # timezone: Asia/Shanghai
+
+inputs:
+  dataFile:
+    type: string
+    description: "Excel 数据文件路径"
+    default: ""
+  recipients:
+    type: string
+    description: "收件人邮箱（逗号分隔）"
+    default: ""
+
+steps:
+  - id: readData
+    action: file.read
+    params:
+      path: "{{ $inputs.dataFile }}"
+      parse: auto
+    continueOnError: true
+
+  - id: notifyStart
+    action: system.notify
+    params:
+      title: "月报生成中"
+      message: "正在分析数据，请稍候…"
+
+  - id: saveReport
+    action: file.write
+    params:
+      path: "/tmp/monthly-report-{{ $inputs.dataFile }}.json"
+      content: "{{ $readData.data }}"
+    condition: "$readData.ok == true"
+
+  - id: notifyDone
+    action: system.notify
+    params:
+      title: "月报已完成"
+      message: "月度分析报告生成完毕"

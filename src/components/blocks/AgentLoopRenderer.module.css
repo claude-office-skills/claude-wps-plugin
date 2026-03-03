@@ -1,0 +1,191 @@
+.wrapper {
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.header:hover {
+  background: var(--bg-hover);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pulseIndicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+
+.headerTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.runningBadge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-active);
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.abortBtn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--error);
+  background: transparent;
+  color: var(--error);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.abortBtn:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+.collapseIcon {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.body {
+  padding: 4px 12px 12px;
+  position: relative;
+}
+
+.stepItem {
+  display: flex;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.stepTimeline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 14px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.stepDot {
+  font-size: 10px;
+  line-height: 1;
+  z-index: 1;
+}
+
+.stepDotActive {
+  animation: pulse 1.5s infinite;
+}
+
+.stepLine {
+  width: 1px;
+  flex: 1;
+  min-height: 8px;
+  background: var(--border);
+  margin-top: 2px;
+}
+
+.stepContent {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 6px;
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phaseBadge {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.stepLabel {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepDuration {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.stepDetail {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activeIndicator {
+  position: relative;
+  height: 2px;
+  margin-top: 4px;
+  border-radius: 1px;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+.scanLine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: scan 2s ease-in-out infinite;
+}
+
+@keyframes scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}

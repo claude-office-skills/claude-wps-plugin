@@ -54,22 +54,49 @@ export interface ExecuteResult {
   diff: DiffResult | null;
 }
 
+export class BlockedError extends Error {
+  reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.name = "BlockedError";
+    this.reason = reason;
+  }
+}
+
 export async function executeCode(
   code: string,
   agentId?: string,
+  force?: boolean,
 ): Promise<ExecuteResult> {
   const submitRes = await fetch(`${PROXY_URL}/execute-code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, agentId }),
+    body: JSON.stringify({ code, agentId, force }),
   });
 
   if (!submitRes.ok) {
     throw new Error(`提交代码失败: HTTP ${submitRes.status}`);
   }
 
-  const { id } = await submitRes.json();
+  const submitData = await submitRes.json();
 
+  if (submitData.blocked) {
+    throw new BlockedError(submitData.reason || "操作被安全策略拦截");
+  }
+
+  // v2.6: local.* actions return results immediately, no polling needed
+  if (submitData.localResult) {
+    const lr = submitData.localResult;
+    if (lr.error) {
+      throw new Error(lr.message || lr.error);
+    }
+    return {
+      result: JSON.stringify(lr, null, 2),
+      diff: null,
+    };
+  }
+
+  const id = submitData.id;
   const deadline = Date.now() + CODE_RESULT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -91,6 +118,65 @@ export async function executeCode(
   }
 
   throw new Error("代码执行超时（30秒）");
+}
+
+/** v2.2.0: Execute Python code via proxy */
+export async function executePython(code: string): Promise<ExecuteResult> {
+  const res = await fetch(`${PROXY_URL}/execute-python`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || "Python 执行失败");
+  return { result: data.result || "执行成功", diff: null };
+}
+
+/** v2.2.0: Execute shell command via proxy */
+export async function executeShell(command: string): Promise<ExecuteResult> {
+  const res = await fetch(`${PROXY_URL}/execute-shell`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || "命令执行失败");
+  return { result: data.result || "执行成功", diff: null };
+}
+
+/** v2.2.0: Preview HTML via proxy */
+export async function previewHtml(
+  html: string,
+  title?: string,
+): Promise<ExecuteResult> {
+  const res = await fetch(`${PROXY_URL}/preview-html`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html, title }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || "HTML 预览失败");
+  return { result: `已在浏览器中打开预览: ${data.path}`, diff: null };
+}
+
+/** 根据 diff 中的 before 值将单元格还原 */
+export async function revertDiff(diff: DiffResult): Promise<void> {
+  if (!diff.changes.length) return;
+  const lines: string[] = ["var ws = Application.ActiveSheet;"];
+  for (const ch of diff.changes) {
+    const val =
+      ch.before === null || ch.before === undefined || ch.before === ""
+        ? null
+        : ch.before;
+    if (val === null) {
+      lines.push(`ws.Range("${ch.cell}").ClearContents();`);
+    } else if (typeof val === "string") {
+      lines.push(`ws.Range("${ch.cell}").Value2 = ${JSON.stringify(val)};`);
+    } else {
+      lines.push(`ws.Range("${ch.cell}").Value2 = ${val};`);
+    }
+  }
+  await executeCode(lines.join("\n"));
 }
 
 export async function navigateToCell(

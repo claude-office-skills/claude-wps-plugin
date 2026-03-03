@@ -2,10 +2,28 @@ import { useState, useRef, useEffect, memo } from "react";
 import type { InteractionMode } from "../types";
 import styles from "./ModeSelector.module.css";
 
-const MODE_CONFIG: Record<InteractionMode, { label: string; desc: string }> = {
-  agent: { label: "Agent", desc: "自动执行代码" },
-  plan: { label: "Plan", desc: "生成步骤规划" },
-  ask: { label: "Ask", desc: "只读分析问答" },
+const MODE_CONFIG: Record<
+  InteractionMode,
+  { label: string; desc: string; dotClass: string; textClass: string }
+> = {
+  agent: {
+    label: "Agent",
+    desc: "自动执行代码",
+    dotClass: styles.dotAgent,
+    textClass: styles.textAgent,
+  },
+  plan: {
+    label: "Plan",
+    desc: "生成步骤规划",
+    dotClass: styles.dotPlan,
+    textClass: styles.textPlan,
+  },
+  ask: {
+    label: "Ask",
+    desc: "只读分析问答",
+    dotClass: styles.dotAsk,
+    textClass: styles.textAsk,
+  },
 };
 
 const MODES: InteractionMode[] = ["agent", "plan", "ask"];
@@ -46,9 +64,13 @@ const ModeSelector = memo(function ModeSelector({
         disabled={disabled}
         title={`当前模式: ${current.label} — ${current.desc}`}
       >
-        <span className={styles.modeDot} />
-        <span className={styles.modeName}>{current.label}</span>
-        <span className={styles.arrow}>{open ? "▴" : "▾"}</span>
+        <span className={`${styles.modeDot} ${current.dotClass}`} />
+        <span className={`${styles.modeName} ${current.textClass}`}>
+          {current.label}
+        </span>
+        <span className={`${styles.arrow} ${current.textClass}`}>
+          {open ? "▴" : "▾"}
+        </span>
       </button>
 
       {open && (
@@ -65,9 +87,16 @@ const ModeSelector = memo(function ModeSelector({
                   setOpen(false);
                 }}
               >
-                <div className={styles.optLabel}>{cfg.label}</div>
+                <div className={styles.optRow}>
+                  <span className={`${styles.optDot} ${cfg.dotClass}`} />
+                  <span className={styles.optLabel}>{cfg.label}</span>
+                </div>
                 <div className={styles.optDesc}>{cfg.desc}</div>
-                {isActive && <span className={styles.optCheck}>✓</span>}
+                {isActive && (
+                  <span className={`${styles.optCheck} ${cfg.textClass}`}>
+                    ✓
+                  </span>
+                )}
               </button>
             );
           })}

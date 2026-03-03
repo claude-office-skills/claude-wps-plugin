@@ -4,7 +4,12 @@
  * 通过本地代理服务器（proxy-server.js）调用 claude CLI，
  * 绕过 OAuth token 无法直接调用 Anthropic 公开 API 的限制。
  */
-import type { WpsContext, ChatMessage, AttachmentFile } from "../types";
+import type {
+  WpsContext,
+  ChatMessage,
+  AttachmentFile,
+  ActivityEvent,
+} from "../types";
 
 const PROXY_BASE = "http://127.0.0.1:3001";
 
@@ -63,6 +68,8 @@ export interface StreamCallbacks {
   ) => void;
   onError: (err: Error) => void;
   onModeInfo?: (mode: string, enforcement: Record<string, unknown>) => void;
+  onActivity?: (activity: ActivityEvent) => void;
+  onAgentInfo?: (agent: { name: string; color: string; model: string }) => void;
 }
 
 /** 检查代理服务器是否在运行 */
@@ -72,7 +79,7 @@ export async function checkProxy(): Promise<boolean> {
       signal: AbortSignal.timeout(2000),
     });
     return resp.ok;
-  } catch {
+  } catch (e) {
     return false;
   }
 }
@@ -83,6 +90,7 @@ export interface SendMessageOptions {
   signal?: AbortSignal;
   webSearch?: boolean;
   mode?: string;
+  agentName?: string;
 }
 
 /**
@@ -105,11 +113,23 @@ function processSseLines(
     if (!data) continue;
     try {
       const event = JSON.parse(data);
-      if (event.type === "mode") {
+      if (event.type === "agent_info") {
+        callbacks.onAgentInfo?.({
+          name: event.agent,
+          color: event.color,
+          model: event.model,
+        });
+      } else if (event.type === "mode") {
         callbacks.onModeInfo?.(event.mode, event.enforcement);
         if (event.provenance && provenanceRef) {
           provenanceRef.v = event.provenance;
         }
+      } else if (event.type === "activity") {
+        callbacks.onActivity?.({
+          action: event.action || "unknown",
+          name: event.name || "",
+          timestamp: Date.now(),
+        });
       } else if (event.type === "token") {
         fullTextRef.v += event.text;
         callbacks.onToken(event.text);
@@ -164,6 +184,7 @@ export async function sendMessage(
   const payload: Record<string, unknown> = { messages, context };
   if (options?.model) payload.model = options.model;
   if (options?.mode) payload.mode = options.mode;
+  if (options?.agentName) payload.agentName = options.agentName;
   if (options?.webSearch) payload.webSearch = true;
   if (options?.attachments?.length) {
     payload.attachments = options.attachments.map((f) => ({
@@ -184,6 +205,7 @@ export async function sendMessage(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${PROXY_BASE}/chat`, true);
     xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.timeout = 330_000;
 
     let buffer = "";
     let aborted = false;
@@ -195,9 +217,30 @@ export async function sendMessage(
       });
     }
 
+    xhr.ontimeout = () => {
+      if (aborted) return;
+      if (fullTextRef.v) {
+        callbacks.onComplete(fullTextRef.v, provenanceRef.v);
+      } else {
+        reject(
+          new Error(
+            "请求超时（超过 5 分钟），请检查网络连接或切换到 Haiku 模型重试",
+          ),
+        );
+      }
+    };
+
     xhr.onprogress = () => {
-      const newData = xhr.responseText.slice(prevLen);
-      prevLen = xhr.responseText.length;
+      const currentText = xhr.responseText;
+      let newData: string;
+      if (currentText.length < prevLen) {
+        // WPS WebView reset responseText (non-accumulative) — treat whole text as new
+        newData = currentText;
+        prevLen = currentText.length;
+      } else {
+        newData = currentText.slice(prevLen);
+        prevLen = currentText.length;
+      }
       if (!newData) return;
 
       buffer += newData;
@@ -217,7 +260,9 @@ export async function sendMessage(
         reject(new Error(`代理服务器错误 ${xhr.status}: ${xhr.responseText}`));
         return;
       }
-      const remaining = xhr.responseText.slice(prevLen);
+      const finalText = xhr.responseText;
+      const remaining =
+        finalText.length < prevLen ? finalText : finalText.slice(prevLen);
       if (remaining) {
         buffer += remaining;
         try {

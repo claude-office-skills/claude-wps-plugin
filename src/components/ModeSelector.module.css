@@ -8,11 +8,13 @@
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
+  height: 22px;
   border: none;
   border-radius: 6px;
   background: var(--bg-hover);
   cursor: pointer;
   transition: background 0.15s;
+  box-sizing: border-box;
 }
 
 .trigger:hover:not(:disabled) {
@@ -28,7 +30,6 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
   flex-shrink: 0;
 }
 
@@ -36,15 +37,25 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent);
   white-space: nowrap;
 }
 
 .arrow {
   font-size: 8px;
-  color: var(--accent);
   line-height: 1;
 }
+
+/* Agent — 中性灰 */
+.dotAgent { background: var(--text-secondary); }
+.textAgent { color: var(--text-secondary); }
+
+/* Plan — 黄色 */
+.dotPlan { background: #e5b45a; }
+.textPlan { color: #e5b45a; }
+
+/* Ask — 绿色 */
+.dotAsk { background: #4ade80; }
+.textAsk { color: #4ade80; }
 
 .dropdown {
   position: absolute;
@@ -88,6 +99,19 @@
   background: var(--bg-hover);
 }
 
+.optRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.optDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .optLabel {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 12px;
@@ -99,13 +123,13 @@
   font-size: 10px;
   color: var(--text-muted);
   line-height: 1.3;
+  padding-left: 12px;
 }
 
 .optCheck {
   position: absolute;
   top: 10px;
   right: 12px;
-  color: var(--accent);
   font-size: 12px;
   font-weight: 600;
 }

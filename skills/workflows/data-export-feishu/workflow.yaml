@@ -1,0 +1,43 @@
+# 数据导出并推送飞书工作流示例
+# 触发：手动 或 Webhook POST /trigger/data-export-feishu
+name: data-export-feishu
+description: "读取本地 CSV/JSON → 格式化摘要 → 推送飞书群消息"
+
+trigger:
+  type: manual
+
+inputs:
+  dataPath:
+    type: string
+    description: "本地数据文件路径（CSV/JSON）"
+  title:
+    type: string
+    description: "飞书消息标题"
+    default: "数据推送"
+  feishuWebhook:
+    type: string
+    description: "飞书 Webhook URL（覆盖全局配置）"
+    default: ""
+
+steps:
+  - id: readFile
+    action: file.read
+    params:
+      path: "{{ $inputs.dataPath }}"
+      parse: auto
+
+  - id: pushFeishu
+    action: notify.feishu
+    condition: "$readFile.ok == true"
+    params:
+      title: "{{ $inputs.title }}"
+      markdown: |
+        **数据文件：** {{ $inputs.dataPath }}
+        **记录数：** {{ $readFile.size }} 字节
+        **时间：** {{ $readFile.ok }}
+
+  - id: notifyLocal
+    action: system.notify
+    params:
+      title: "推送完成"
+      message: "数据已推送到飞书"
