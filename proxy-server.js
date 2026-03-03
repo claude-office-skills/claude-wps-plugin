@@ -540,15 +540,16 @@ Excel: fillColor / setFontColor / clearRange / insertFormula / batchFormula / so
 `;
 
 /**
- * 估算文本的 token 复杂度（用于 prompt 分级）
+ * 估算当前请求的复杂度（用于 prompt 分级 / thinking 预算 / 超时）
+ * 核心判断维度是**当前用户消息**的长度与复杂度，
+ * 对话历史只做辅助权重（长对话不代表当前问题复杂）。
  * 返回 "light" | "standard" | "heavy"
  */
 function estimatePromptTier(userMessage, messages) {
   const msgLen = (userMessage || "").length;
-  const totalChars = messages.reduce((s, m) => s + (m.content || "").length, 0);
 
-  if (msgLen < 20 && totalChars < 200) return "light";
-  if (msgLen < 200 && totalChars < 4000) return "standard";
+  if (msgLen < 30) return "light";
+  if (msgLen < 300) return "standard";
   return "heavy";
 }
 
@@ -596,7 +597,9 @@ function buildSystemPrompt(skills, todayStr, userMessage, modeSkill, messages) {
     prompt += CHART_STYLE_OVERRIDE + "\n\n";
   }
 
-  console.log(`[prompt] tier=${tier}, skills=${skills.length}, chars=${prompt.length}`);
+  console.log(
+    `[prompt] tier=${tier}, skills=${skills.length}, chars=${prompt.length}`,
+  );
   return prompt;
 }
 
@@ -1926,7 +1929,11 @@ app.post("/execute-code", async (req, res) => {
 
   // Step 1: Try parsing as JSON — parse failure means normal code, fall through
   let _parsed = null;
-  try { _parsed = JSON.parse(code); } catch (_) { /* not JSON, fall through */ }
+  try {
+    _parsed = JSON.parse(code);
+  } catch (_) {
+    /* not JSON, fall through */
+  }
 
   // Step 2: If it's a valid local.* action, handle entirely here (never fall through)
   if (_parsed && _parsed._action && _parsed._action.startsWith("local.")) {
@@ -1942,13 +1949,20 @@ app.post("/execute-code", async (req, res) => {
         return res.json({
           ok: true,
           id: `local-${Date.now()}`,
-          localResult: { error: "permission_required", message: guard.userMessage },
+          localResult: {
+            error: "permission_required",
+            message: guard.userMessage,
+          },
         });
       }
 
       const { executeAction } = await import("./lib/action-registry.js");
       const result = await executeAction(actionName, actionParams);
-      return res.json({ ok: true, id: `local-${Date.now()}`, localResult: result });
+      return res.json({
+        ok: true,
+        id: `local-${Date.now()}`,
+        localResult: result,
+      });
     } catch (actionErr) {
       console.error("[local-action]", actionErr.message);
       return res.json({
@@ -1964,7 +1978,11 @@ app.post("/execute-code", async (req, res) => {
     try {
       const { executeAction } = await import("./lib/action-registry.js");
       const result = await executeAction(_parsed._action, _parsed._args || {});
-      return res.json({ ok: true, id: `action-${Date.now()}`, localResult: result });
+      return res.json({
+        ok: true,
+        id: `action-${Date.now()}`,
+        localResult: result,
+      });
     } catch (actionErr) {
       return res.json({
         ok: true,
@@ -2449,7 +2467,8 @@ app.post("/chat", (req, res) => {
   }
 
   fullPrompt +=
-    buildSystemPrompt(allMatched, todayStr, lastUserMsg, modeSkill, messages) + "\n";
+    buildSystemPrompt(allMatched, todayStr, lastUserMsg, modeSkill, messages) +
+    "\n";
 
   // v2.2.0: Record skill usage for preference learning
   if (APP_CONFIG.memory.enabled && allMatched.length > 0) {
@@ -2573,26 +2592,48 @@ app.post("/chat", (req, res) => {
     }
   }, 5000);
 
+  const promptTier = estimatePromptTier(lastUserMsg, messages);
+
   const claudePath = RESOLVED_CLAUDE_PATH;
   const maxTurns = String(
     enforcement.maxTurns || (currentMode === "ask" ? 1 : 5),
   );
-  // Effort strategy: ask/agent → low (fast, no heavy thinking); plan → medium; team → high
   const cliArgs = [
     "-p",
     "--verbose",
     "--output-format",
     "stream-json",
     "--max-turns",
-    maxTurns,
+    promptTier === "light" ? "1" : maxTurns,
     "--model",
     selectedModel,
   ];
-  // effort 策略：根据 prompt 复杂度 + 模式动态决定
-  const promptTier = estimatePromptTier(lastUserMsg, messages);
+
+  // ── Light Tier 快速路径：
+  //    用 --system-prompt 传入预缓存的核心 prompt（保留全部 Excel/代码/JSON 能力），
+  //    跳过 CLI 默认加载（CLAUDE.md + 插件 hooks + MCP 工具定义）。
+  //    --disable-slash-commands 跳过 skills 加载（skills 在 standard/heavy tier 按需注入）。
+  //    实测：默认 CLI ~22-34s → 核心 prompt 快速路径 ~5-8s
   if (promptTier === "light") {
-    cliArgs.push("--effort", "min");
-  } else if (currentMode === "plan" || currentMode === "team") {
+    let lightPrompt = _STATIC_CORE_PROMPT.replace(
+      "你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。",
+      `你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天是 ${todayStr}。`,
+    );
+    lightPrompt += _STATIC_CAPABILITY_PROMPT;
+    if (context)
+      lightPrompt += `\n[当前 Excel 上下文]\n${smartSampleContext(context)}\n`;
+    // --setting-sources "" 跳过用户插件 hooks（尤其是 SessionStart，实测节省 15-20s）
+    cliArgs.push(
+      "--system-prompt",
+      lightPrompt,
+      "--disable-slash-commands",
+      "--setting-sources",
+      "",
+    );
+  }
+  // effort 策略：根据 prompt 复杂度 + 模式动态决定
+  // 注意：effort 仅对 Opus 4.6 生效 (https://code.claude.com/docs/en/model-config.md)
+  if (currentMode === "plan" || currentMode === "team") {
     cliArgs.push("--effort", "medium");
   } else {
     cliArgs.push("--effort", "low");
@@ -2623,21 +2664,79 @@ app.post("/chat", (req, res) => {
     "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
   ];
-  const cleanEnv = {};
-  cleanEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000";
-  for (const key of ENV_WHITELIST) {
-    if (process.env[key]) cleanEnv[key] = process.env[key];
+  // Light tier: 使用完整环境（与终端直接调用一致），追加优化参数
+  // Standard/Heavy tier: 使用精简 cleanEnv（安全隔离）
+  let spawnEnv;
+  if (promptTier === "light") {
+    spawnEnv = {
+      ...process.env,
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "32000",
+      CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "1",
+      MAX_THINKING_TOKENS: "500",
+    };
+  } else {
+    const cleanEnv = {};
+    cleanEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000";
+    if (promptTier === "standard") {
+      cleanEnv.MAX_THINKING_TOKENS = "8000";
+    }
+    for (const key of ENV_WHITELIST) {
+      if (process.env[key]) cleanEnv[key] = process.env[key];
+    }
+    spawnEnv = cleanEnv;
   }
-  const child = spawn(claudePath, cliArgs, { env: cleanEnv });
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "eab716",
+    },
+    body: JSON.stringify({
+      sessionId: "eab716",
+      location: "proxy-server.js:spawn",
+      message: "CLI spawn params",
+      data: {
+        promptTier,
+        maxTurns: cliArgs[cliArgs.indexOf("--max-turns") + 1],
+        selectedModel,
+        lightFastPath: cliArgs.includes("--system-prompt"),
+        disabledSlash: cliArgs.includes("--disable-slash-commands"),
+        effort: cliArgs.includes("--effort")
+          ? cliArgs[cliArgs.indexOf("--effort") + 1]
+          : "none",
+        thinkingTokens: spawnEnv.MAX_THINKING_TOKENS || "default(31999)",
+        timeoutMs:
+          promptTier === "light"
+            ? 45000
+            : promptTier === "standard"
+              ? 120000
+              : 180000,
+        userMsg: lastUserMsg.substring(0, 50),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  const child = spawn(claudePath, cliArgs, { env: spawnEnv });
 
   // CLI 超时保护：light 45s, standard 120s, heavy 180s
-  const CLI_TIMEOUT_MS = promptTier === "light" ? 45_000 : promptTier === "standard" ? 120_000 : 180_000;
+  const CLI_TIMEOUT_MS =
+    promptTier === "light"
+      ? 45_000
+      : promptTier === "standard"
+        ? 120_000
+        : 180_000;
   const cliTimer = setTimeout(() => {
     if (!child.killed) {
-      console.log(`[chat] CLI timeout after ${CLI_TIMEOUT_MS}ms, killing process`);
+      console.log(
+        `[chat] CLI timeout after ${CLI_TIMEOUT_MS}ms, killing process`,
+      );
       child.kill("SIGTERM");
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ type: "result", subtype: "text", text: "\n\n⚠️ 响应超时，请重试或换用更快的模型。" })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ type: "result", subtype: "text", text: "\n\n⚠️ 响应超时，请重试或换用更快的模型。" })}\n\n`,
+        );
       }
     }
   }, CLI_TIMEOUT_MS);
@@ -2671,7 +2770,20 @@ app.post("/chat", (req, res) => {
   // v2.3.0: No longer emit skill_loaded activities upfront — activities
   // are now driven by actual tool_use events detected from the CLI stream.
 
-  child.stdin.write(fullPrompt);
+  // Light tier: 系统 prompt 已通过 --system-prompt 传入，stdin 只传用户消息 + 必要历史
+  if (promptTier === "light") {
+    let lightInput = "";
+    if (messages.length > 1) {
+      messages.slice(-3, -1).forEach((m) => {
+        const role = m.role === "user" ? "用户" : "助手";
+        lightInput += `${role}: ${m.content}\n\n`;
+      });
+    }
+    lightInput += messages[messages.length - 1].content;
+    child.stdin.write(lightInput);
+  } else {
+    child.stdin.write(fullPrompt);
+  }
   child.stdin.end();
 
   let resultText = "";
@@ -2741,8 +2853,32 @@ app.post("/chat", (req, res) => {
     _drainChunks();
   }
 
+  let _stdoutFirstChunk = true;
   child.stdout.on("data", (data) => {
     _lastDataTime = Date.now();
+    // #region agent log
+    if (_stdoutFirstChunk) {
+      _stdoutFirstChunk = false;
+      const raw = data.toString().substring(0, 300);
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "proxy-server.js:stdout-first",
+            message: "First stdout chunk",
+            data: { elapsedMs: Date.now() - _streamStartTime, rawPreview: raw },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+    }
+    // #endregion
     _lineBuf += data.toString();
     const lines = _lineBuf.split("\n");
     _lineBuf = lines.pop() ?? "";
@@ -2812,11 +2948,58 @@ app.post("/chat", (req, res) => {
     const chunk = data.toString().trim();
     _stderrBuf += chunk + "\n";
     console.error("[proxy] stderr:", chunk);
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "eab716",
+      },
+      body: JSON.stringify({
+        sessionId: "eab716",
+        location: "proxy-server.js:stderr",
+        message: "CLI stderr output",
+        data: { stderr: chunk.substring(0, 500) },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   });
 
   child.on("close", (code, signal) => {
     clearTimeout(cliTimer);
     clearInterval(_idleTimer);
+    // #region agent log
+    const _totalMs = Date.now() - _streamStartTime;
+    const _ttft = _firstTokenTime ? _firstTokenTime - _streamStartTime : -1;
+    const _tttt = _firstThinkTime ? _firstThinkTime - _streamStartTime : -1;
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "eab716",
+      },
+      body: JSON.stringify({
+        sessionId: "eab716",
+        location: "proxy-server.js:close",
+        message: "CLI completed",
+        data: {
+          code,
+          signal,
+          totalMs: _totalMs,
+          ttFirstToken: _ttft,
+          ttFirstThink: _tttt,
+          thinkingChars: _thinkingText.length,
+          resultChars: resultText.length,
+          promptTier,
+          selectedModel,
+          maxTurns,
+          thinkingTokenEnv: spawnEnv.MAX_THINKING_TOKENS || "default",
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const TOKEN_LIMIT_RE =
       /exceeded the \d+ output token maximum|output_token.*limit|max_tokens_exceeded/i;
     const isTokenLimit =
