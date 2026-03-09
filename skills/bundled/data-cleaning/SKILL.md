@@ -17,7 +17,7 @@ context:
 根据用户意图选择策略，不要自行决定删除数据：
 
 ```javascript
-var ws = ActiveSheet;
+var ws = Application.ActiveSheet;
 var ur = ws.UsedRange;
 var lastRow = ur.Row + ur.Rows.Count - 1;
 var lastCol = ur.Column + ur.Columns.Count - 1;

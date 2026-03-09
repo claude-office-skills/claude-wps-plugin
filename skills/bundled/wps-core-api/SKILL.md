@@ -205,16 +205,16 @@ ws.Names.Add("本表总计", ws.Range("E100"));
 ```javascript
 // 必须用 Shapes.AddChart2（ChartObjects.Add 不可用）
 // 类型：57=折线, 51=簇状柱形, 5=面积, 65=饼图
-var shape = ws.Shapes.AddChart2(-1, 57, left, top, width, height);
+var shape = ws.Shapes.AddChart2(0, 57, left, top, width, height);
 var chart = shape.Chart;
 chart.HasTitle = true;
 chart.ChartTitle.Text = "标题";
 chart.SetSourceData(ws.Range("A1:C20"));
 
-var s = chart.SeriesCollection(1);
+var s = chart.SeriesCollection.Item(1);
 s.Name = "系列名";
 s.XValues = ws.Range("A2:A20");
-s.Values  = ws.Range("B2:B20");
+s.Values = ws.Range("B2:B20");
 ```
 
 ---
@@ -262,25 +262,37 @@ union.Font.Bold = true;
 
 ---
 
-## ❌ 不可用 API（WPS 加载项严禁，会崩溃）
+## ❌ 不可用 API（WPS JS 宏严禁，会崩溃或报错）
 
-| 禁用 API | 原因 | 正确替代 |
+| 禁用写法 | 原因 | 正确替代 |
 |---------|------|---------|
-| `ws = wb.Sheets.Add()` | 返回 null | `wb.Sheets.Add(); ws = wb.ActiveSheet;` |
-| `ws.Cells(row, col)` | 不支持 | `ws.Range(CL(col)+row)` |
-| `ws.Rows(n)` | 不可用 | `ws.Range("n:n")` |
-| `ws.Columns("A")` | 不可用 | `ws.Range("A:A")` |
+| `ws = wb.Sheets.Add()` | 返回 null | `wb.Sheets.Add(); ws = Application.ActiveSheet;` |
+| `ws.Cells(row, col)` | VBA 语法不可用 | `ws.Cells.Item(row, col)` 或 `ws.Range(CL(col)+row)` |
+| `ws.Rows(n)` | VBA 语法不可用 | `ws.Range("n:n")` |
+| `ws.Columns("A")` | VBA 语法不可用 | `ws.Range("A:A")` |
 | `ws.Columns("A").AutoFit()` | 不可用 | 手动设 `ColumnWidth` |
 | `ws.ListObjects` | 不可用 | 普通 Range 模拟 |
 | `ws.ChartObjects.Add()` | 不可用 | `ws.Shapes.AddChart2()` |
 | `.Borders` / `.BorderAround()` | 直接崩溃 | 用背景色区分区域 |
 | `wb.Sheets("名称")` | 括号形式不可用 | `wb.Sheets.Item("名称")` |
+| `chart.SeriesCollection(n)` | 集合括号访问不可用 | `chart.SeriesCollection.Item(n)` |
+| `Worksheets(1)` | 集合括号访问不可用 | `Worksheets.Item(1)` |
 | `End(xlDown)` 字面量 | 枚举不可用 | 用数字：4=下,3=上,2=右,1=左 |
+| `ActiveSheet`（无前缀） | 全局变量不稳定 | `Application.ActiveSheet` |
+| `ActiveWorkbook`（无前缀） | 全局变量不稳定 | `Application.ActiveWorkbook` |
+| `Range("A1").Value` | 写入不可用 | 写入用 `.Value2`，读取用 `.Value()` 或 `.Value2` |
+| `[A1] = 5` | JS 解析为解构赋值 | `Range("A1").Value2 = 5` |
+| `AddChart2(-1, ...)` | Style -1 返回 null | `AddChart2(0, ...)` |
+| `.Cells.Clear()` | 对整表操作不稳定 | `.UsedRange.Clear()` |
 
-## ⚠️ WPS 特殊注意
+## ⚠️ WPS JS 宏 vs Excel VBA 关键差异
 
 1. **颜色是 BGR 不是 RGB**：`0xFF0000` = 蓝色！红色是 `0x0000FF`
-2. **Sheets.Add() 返回 null**，必须用 `wb.ActiveSheet` 获取新表
+2. **Sheets.Add() 返回 null**，必须用 `Application.ActiveSheet` 获取新表
 3. **End() 用数字**：4=xlDown, 3=xlUp, 2=xlRight, 1=xlLeft
 4. **大批量写入前**必须 `Application.ScreenUpdating = false`，否则 WPS 崩溃
 5. **边框完全不可用**：用深色背景+白字替代视觉分隔
+6. **集合访问必须用 .Item()**：`Sheets.Item(1)`、`SeriesCollection.Item(1)` 等
+7. **方法调用必须加括号**：`.Select()`、`.Activate()`、`.Delete()` 等
+8. **JS 严格区分大小写**：`Value2` 不是 `value2`，`Formula` 不是 `formula`
+9. **不支持 VBA 语法**：不能用 `Dim`、`Set`、`Sub/End Sub`、`&`（字符串连接用 `+`）

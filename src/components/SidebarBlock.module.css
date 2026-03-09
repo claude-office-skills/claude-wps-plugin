@@ -210,11 +210,20 @@
 /* ── Ambient blocks (thinking, memory, reference) ── */
 
 .ambientBlock {
-  border-color: transparent;
+  border: none;
+}
+
+.ambientBlock .stripe {
+  display: none;
+}
+
+.ambientBlock .header {
+  border-bottom: none;
+  padding-left: 0;
 }
 
 .ambientBlock:hover {
-  border-color: var(--border-subtle);
+  border: none;
 }
 
 /* ── Collapsible toggle ── */

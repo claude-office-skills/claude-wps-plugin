@@ -113,6 +113,8 @@ export interface ChatMessage {
   planSteps?: PlanStep[];
   provenance?: Provenance;
   isAutoContinue?: boolean;
+  /** Hidden from UI — used for plan step execution prompts */
+  isStepExecution?: boolean;
   activities?: ActivityEvent[];
 }
 

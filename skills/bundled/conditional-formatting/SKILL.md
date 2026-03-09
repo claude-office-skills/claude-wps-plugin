@@ -60,7 +60,7 @@ ws.Range("A1:Z1000").FormatConditions.Delete();
 
 ```javascript
 function CL(c){var s="";while(c>0){c--;s=String.fromCharCode(65+(c%26))+s;c=Math.floor(c/26);}return s;}
-var ws = ActiveSheet;
+var ws = Application.ActiveSheet;
 var ur = ws.UsedRange;
 var r1 = ur.Row, c1 = ur.Column;
 var rEnd = r1 + ur.Rows.Count - 1;

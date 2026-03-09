@@ -28,6 +28,27 @@
   line-height: 1.4;
 }
 
+.planningRow {
+  display: flex;
+  align-items: center;
+  padding: 8px 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  animation: planPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes planPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.errorRow {
+  font-size: 11px;
+  color: var(--error);
+  padding: 4px 6px;
+  line-height: 1.4;
+}
+
 .subtaskList {
   display: flex;
   flex-direction: column;

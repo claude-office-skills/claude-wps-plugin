@@ -95,10 +95,10 @@ export const BLOCK_CONFIGS: Record<SidebarBlockType, BlockConfig> = {
     prominence: "ambient",
   },
   "plan-steps": {
-    stripeVar: "--plan-color",
+    stripeVar: "--border-primary",
     bgVar: "--bg-surface",
-    titleColorVar: "--plan-color",
-    icon: "📋",
+    titleColorVar: "--text-secondary",
+    icon: "",
     defaultTitle: "Plan",
     actions: ["executeStep", "executeAll", "skip"],
     prominence: "prominent",

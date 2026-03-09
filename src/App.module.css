@@ -194,10 +194,10 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 14px 4px;
+  padding: 12px 14px 4px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -472,13 +472,13 @@
 }
 
 .stopBtn {
-  background: var(--accent);
-  color: #fff;
-  filter: grayscale(35%) brightness(0.85);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
 }
 
 .stopBtn:hover {
-  filter: grayscale(15%) brightness(0.95);
+  background: var(--bg-hover);
+  color: var(--text-primary);
   opacity: 1;
 }
 

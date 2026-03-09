@@ -26,6 +26,8 @@ interface Props {
   onSwitchToAgent?: () => void;
   onPlanStepsChange?: (msgId: string, steps: PlanStep[]) => void;
   onConfirmPlan?: (msgId: string, steps: PlanStep[]) => void;
+  onExecuteStep?: (msgId: string, stepIndex: number) => void;
+  onSkipStep?: (msgId: string, stepIndex: number) => void;
   onResubmit?: (msgId: string, content: string) => void;
   isLatestUser?: boolean;
   onRevert?: (msgId: string) => void;
@@ -103,6 +105,8 @@ function MessageBubble({
   onSwitchToAgent,
   onPlanStepsChange,
   onConfirmPlan,
+  onExecuteStep,
+  onSkipStep,
   onResubmit,
   isLatestUser,
   onRevert,
@@ -120,6 +124,14 @@ function MessageBubble({
   const handleConfirmPlan = useCallback(
     (steps: PlanStep[]) => onConfirmPlan?.(message.id, steps),
     [message.id, onConfirmPlan],
+  );
+  const handleExecuteStep = useCallback(
+    (stepIndex: number) => onExecuteStep?.(message.id, stepIndex),
+    [message.id, onExecuteStep],
+  );
+  const handleSkipStep = useCallback(
+    (stepIndex: number) => onSkipStep?.(message.id, stepIndex),
+    [message.id, onSkipStep],
   );
 
   const codeBlocks = message.codeBlocks ?? [];
@@ -158,6 +170,10 @@ function MessageBubble({
   };
 
   if (isUser) {
+    if (message.isStepExecution) {
+      return null;
+    }
+
     if (message.isAutoContinue) {
       const lines = message.content.split("\n").slice(0, 5);
       return (
@@ -182,6 +198,12 @@ function MessageBubble({
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Let all native shortcuts (Cmd+A, Cmd+C, Cmd+V, Cmd+Z, etc.) pass through
+      if (e.metaKey || e.ctrlKey) return;
+      if (e.key === "Escape") {
+        setEditing(false);
+        return;
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         onResubmit?.(message.id, editText.trim() || message.content);
@@ -243,6 +265,12 @@ function MessageBubble({
   const isStreamingContent = !!message.isStreaming && !!message.content;
   const isDone = !message.isStreaming;
 
+  // #region agent log
+  if (message.isStreaming) {
+    fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f532b6'},body:JSON.stringify({sessionId:'f532b6',location:'MessageBubble.tsx:render',message:'streaming msg render',hypothesisId:'B',data:{msgId:message.id,isThinking,hasThinkingContent:!!message.thinkingContent,thinkingLen:message.thinkingContent?.length??0,hasContent:!!message.content,contentLen:message.content?.length??0},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
+
   return (
     <div className={styles.msgRow}>
       <div className={styles.assistBubble}>
@@ -262,7 +290,9 @@ function MessageBubble({
 
         {/* Streaming content — partial Markdown rendering */}
         {isStreamingContent && (
-          <div className={styles.assistContent}>
+          <div
+            className={`${styles.assistContent} ${styles.assistContentStreaming}`}
+          >
             <ReactMarkdown
               remarkPlugins={remarkPlugins}
               components={streamingComponents}
@@ -285,73 +315,98 @@ function MessageBubble({
           </div>
         )}
 
-        {message.planSteps &&
-          message.planSteps.length > 0 &&
-          !message.isStreaming && (
-            <PlanRenderer
-              steps={message.planSteps}
-              onStepsChange={handlePlanStepsChange}
-              onConfirmPlan={handleConfirmPlan}
-            />
-          )}
+        {message.planSteps && message.planSteps.length > 0 && (
+          <PlanRenderer
+            steps={message.planSteps}
+            onStepsChange={handlePlanStepsChange}
+            onConfirmPlan={handleConfirmPlan}
+            onExecuteStep={handleExecuteStep}
+            onSkipStep={handleSkipStep}
+          />
+        )}
 
-        {executableBlocks.length > 0 && !message.isStreaming && (() => {
-          const langs = executableBlocks.map((b) => (b.language || "javascript").toLowerCase());
-          const isLocal = executableBlocks.some((b) => b.code.trim().startsWith('{"_action"'));
-          let actionLabel = "应用到表格";
-          let doneLabel = "已应用到表格";
-          if (isLocal) {
-            try {
-              const parsed = JSON.parse(executableBlocks.find((b) => b.code.trim().startsWith('{"_action"'))!.code);
-              const a = (parsed._action || "") as string;
-              const localLabels: Record<string, [string, string]> = {
-                "local.browser.open": ["打开网页", "已打开网页"],
-                "local.browser.tabs": ["获取标签页", "已获取标签页"],
-                "local.finder.open": ["打开 Finder", "已打开 Finder"],
-                "local.apps.launch": ["启动应用", "已启动应用"],
-                "local.apps.quit": ["退出应用", "已退出应用"],
-                "local.apps.list": ["列出应用", "已列出应用"],
-                "local.calendar.list": ["查看日历", "已查看日历"],
-                "local.calendar.create": ["创建日历事件", "已创建日历事件"],
-                "local.mail.send": ["发送邮件", "已发送邮件"],
-                "local.mail.unread": ["查看未读邮件", "已查看未读邮件"],
-                "local.clipboard.get": ["读取剪贴板", "已读取剪贴板"],
-                "local.clipboard.set": ["写入剪贴板", "已写入剪贴板"],
-                "local.system.info": ["获取系统信息", "已获取系统信息"],
-                "local.applescript": ["执行脚本", "已执行脚本"],
-              };
-              if (localLabels[a]) { [actionLabel, doneLabel] = localLabels[a]; }
-              else { actionLabel = a.replace("local.", ""); doneLabel = `已执行 ${actionLabel}`; }
-            } catch {}
-          } else if (langs.some((l) => ["bash","shell","sh","zsh","terminal"].includes(l))) {
-            actionLabel = "执行命令"; doneLabel = "已执行命令";
-          } else if (langs.some((l) => ["python","py"].includes(l))) {
-            actionLabel = "执行 Python"; doneLabel = "已执行 Python";
-          } else if (langs.some((l) => ["html","htm"].includes(l))) {
-            actionLabel = "预览 HTML"; doneLabel = "已预览 HTML";
-          }
-          return (
-            <div className={styles.applyBar}>
-              {hasUnexecutedCode ? (
-                <button
-                  className={styles.applyBtn}
-                  onClick={() => onApplyCode?.(message.id)}
-                  disabled={isApplying}
-                >
-                  {isApplying ? (
-                    <><SpinnerIcon /> 执行中...</>
-                  ) : (
-                    <><PlayIcon /> {actionLabel}</>
-                  )}
-                </button>
-              ) : (
-                <span className={styles.applyDone}>
-                  <CheckIcon /> {doneLabel}
-                </span>
-              )}
-            </div>
-          );
-        })()}
+        {executableBlocks.length > 0 &&
+          !message.isStreaming &&
+          (() => {
+            const langs = executableBlocks.map((b) =>
+              (b.language || "javascript").toLowerCase(),
+            );
+            const isLocal = executableBlocks.some((b) =>
+              b.code.trim().startsWith('{"_action"'),
+            );
+            let actionLabel = "应用到表格";
+            let doneLabel = "已应用到表格";
+            if (isLocal) {
+              try {
+                const parsed = JSON.parse(
+                  executableBlocks.find((b) =>
+                    b.code.trim().startsWith('{"_action"'),
+                  )!.code,
+                );
+                const a = (parsed._action || "") as string;
+                const localLabels: Record<string, [string, string]> = {
+                  "local.browser.open": ["打开网页", "已打开网页"],
+                  "local.browser.tabs": ["获取标签页", "已获取标签页"],
+                  "local.finder.open": ["打开 Finder", "已打开 Finder"],
+                  "local.apps.launch": ["启动应用", "已启动应用"],
+                  "local.apps.quit": ["退出应用", "已退出应用"],
+                  "local.apps.list": ["列出应用", "已列出应用"],
+                  "local.calendar.list": ["查看日历", "已查看日历"],
+                  "local.calendar.create": ["创建日历事件", "已创建日历事件"],
+                  "local.mail.send": ["发送邮件", "已发送邮件"],
+                  "local.mail.unread": ["查看未读邮件", "已查看未读邮件"],
+                  "local.clipboard.get": ["读取剪贴板", "已读取剪贴板"],
+                  "local.clipboard.set": ["写入剪贴板", "已写入剪贴板"],
+                  "local.system.info": ["获取系统信息", "已获取系统信息"],
+                  "local.applescript": ["执行脚本", "已执行脚本"],
+                };
+                if (localLabels[a]) {
+                  [actionLabel, doneLabel] = localLabels[a];
+                } else {
+                  actionLabel = a.replace("local.", "");
+                  doneLabel = `已执行 ${actionLabel}`;
+                }
+              } catch {}
+            } else if (
+              langs.some((l) =>
+                ["bash", "shell", "sh", "zsh", "terminal"].includes(l),
+              )
+            ) {
+              actionLabel = "执行命令";
+              doneLabel = "已执行命令";
+            } else if (langs.some((l) => ["python", "py"].includes(l))) {
+              actionLabel = "执行 Python";
+              doneLabel = "已执行 Python";
+            } else if (langs.some((l) => ["html", "htm"].includes(l))) {
+              actionLabel = "预览 HTML";
+              doneLabel = "已预览 HTML";
+            }
+            return (
+              <div className={styles.applyBar}>
+                {hasUnexecutedCode ? (
+                  <button
+                    className={styles.applyBtn}
+                    onClick={() => onApplyCode?.(message.id)}
+                    disabled={isApplying}
+                  >
+                    {isApplying ? (
+                      <>
+                        <SpinnerIcon /> 执行中...
+                      </>
+                    ) : (
+                      <>
+                        <PlayIcon /> {actionLabel}
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <span className={styles.applyDone}>
+                    <CheckIcon /> {doneLabel}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
         {message.suggestAgentSwitch && onSwitchToAgent && (
           <div className={styles.modeSwitchBanner}>

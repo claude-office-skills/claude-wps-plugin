@@ -69,6 +69,31 @@ function CodeRenderer({
     try {
       const lang = (block.language || "javascript").toLowerCase();
       const isShell = ["bash", "shell", "sh", "zsh", "terminal"].includes(lang);
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "CodeRenderer.tsx:runCode:start",
+            message: "Starting code execution",
+            data: {
+              lang,
+              isShell,
+              force,
+              codeLen: block.code.length,
+              codeHead: block.code.substring(0, 100),
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       let execResult: { result: string; diff?: DiffResult | null };
       if (lang === "python" || lang === "py") {
         execResult = await executePython(block.code);
@@ -79,6 +104,30 @@ function CodeRenderer({
       } else {
         execResult = await executeCode(block.code, undefined, force);
       }
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "CodeRenderer.tsx:runCode:success",
+            message: "Code execution succeeded",
+            data: {
+              lang,
+              resultLen: execResult.result?.length,
+              resultHead: execResult.result?.substring(0, 100),
+              hasDiff: !!execResult.diff,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       onExecuted(block.id, execResult.result, undefined, execResult.diff);
     } catch (err) {
       if (err instanceof BlockedError) {
@@ -86,6 +135,25 @@ function CodeRenderer({
         return;
       }
       const errMsg = err instanceof Error ? err.message : String(err);
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "CodeRenderer.tsx:runCode:error",
+            message: "Code execution failed",
+            data: { lang, errMsg, codeHead: block.code.substring(0, 100) },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       onExecuted(block.id, "", errMsg);
     } finally {
       setRunning(false);
@@ -178,7 +246,15 @@ function CodeRenderer({
         : ("idle" as const);
 
   const lang = (block.language || "").toLowerCase();
-  const needsConfirm = ["bash","shell","sh","zsh","terminal","python","py"].includes(lang);
+  const needsConfirm = [
+    "bash",
+    "shell",
+    "sh",
+    "zsh",
+    "terminal",
+    "python",
+    "py",
+  ].includes(lang);
   const badge = isLocalAction ? "本地操作" : `${lineCount} 行`;
 
   const headerActions = (
@@ -240,27 +316,61 @@ function CodeRenderer({
 
   // Shell/Python: Cursor 风格确认栏
   const confirmLangLabel: Record<string, string> = {
-    bash: "Terminal", shell: "Terminal", sh: "Terminal", zsh: "Terminal", terminal: "Terminal",
-    python: "Python", py: "Python",
+    bash: "Terminal",
+    shell: "Terminal",
+    sh: "Terminal",
+    zsh: "Terminal",
+    terminal: "Terminal",
+    python: "Python",
+    py: "Python",
   };
-  const confirmFooter = needsConfirm && !block.executed && !block.error && !blockedReason ? (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
-      <div style={{ color: "var(--text-muted)", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span>需要授权 · {confirmLangLabel[lang] || lang} 命令将在本地执行</span>
-      </div>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button
-          className={`${blockStyles.actionBtn} ${blockStyles.actionBtnPrimary}`}
-          onClick={handleRun}
-          disabled={running}
-          style={{ flex: 1, justifyContent: "center" }}
+  const confirmFooter =
+    needsConfirm && !block.executed && !block.error && !blockedReason ? (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          width: "100%",
+        }}
+      >
+        <div
+          style={{
+            color: "var(--text-muted)",
+            fontSize: 11,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
         >
-          {running ? <SpinnerIcon /> : "✓ 允许执行"}
-        </button>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          <span>
+            需要授权 · {confirmLangLabel[lang] || lang} 命令将在本地执行
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            className={`${blockStyles.actionBtn} ${blockStyles.actionBtnPrimary}`}
+            onClick={handleRun}
+            disabled={running}
+            style={{ flex: 1, justifyContent: "center" }}
+          >
+            {running ? <SpinnerIcon /> : "✓ 允许执行"}
+          </button>
+        </div>
       </div>
-    </div>
-  ) : null;
+    ) : null;
 
   const resultFooter = block.result ? (
     <div className={blockStyles.footerInfo}>

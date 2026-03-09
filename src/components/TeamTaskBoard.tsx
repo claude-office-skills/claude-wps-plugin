@@ -14,7 +14,8 @@ interface Subtask {
 interface TeamState {
   id: string;
   goal: string;
-  status: "running" | "done" | "failed";
+  status: "planning" | "running" | "done" | "failed";
+  error?: string;
   subtasks: Subtask[];
 }
 
@@ -46,8 +47,11 @@ function TeamTaskBoard({ team, onDismiss }: Props) {
     setLiveTeam(team);
   }, [team]);
 
+  const isActive =
+    liveTeam.status === "planning" || liveTeam.status === "running";
+
   useEffect(() => {
-    if (liveTeam.status !== "running") {
+    if (!isActive) {
       if (pollerRef.current) clearInterval(pollerRef.current);
       return;
     }
@@ -65,29 +69,42 @@ function TeamTaskBoard({ team, onDismiss }: Props) {
     return () => {
       if (pollerRef.current) clearInterval(pollerRef.current);
     };
-  }, [liveTeam.id, liveTeam.status]);
+  }, [liveTeam.id, isActive]);
 
   const doneCount = liveTeam.subtasks.filter((s) => s.status === "done").length;
   const total = liveTeam.subtasks.length;
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
-  const overallStatus =
-    liveTeam.status === "running"
-      ? "running"
+  const overallStatus = isActive
+    ? "running"
+    : liveTeam.status === "done"
+      ? "success"
+      : "error";
+
+  const isPlanning = liveTeam.status === "planning";
+
+  const badgeText = isPlanning
+    ? "规划中"
+    : isActive
+      ? `${pct}%`
       : liveTeam.status === "done"
-        ? "success"
-        : "error";
+        ? "完成"
+        : "失败";
 
   return (
     <SidebarBlock
       type="progress"
       status={overallStatus as "running" | "success" | "error" | "idle"}
-      title={`🤝 团队任务 · ${doneCount}/${total}`}
-      badge={liveTeam.status === "running" ? `${pct}%` : liveTeam.status}
+      title={
+        isPlanning
+          ? "🤝 团队任务 · 正在规划..."
+          : `🤝 团队任务 · ${doneCount}/${total}`
+      }
+      badge={badgeText}
       collapsed={!expanded}
       onToggle={() => setExpanded((v) => !v)}
       headerActions={
-        liveTeam.status !== "running" ? (
+        !isActive ? (
           <button className={styles.dismissBtn} onClick={onDismiss}>
             关闭
           </button>
@@ -100,36 +117,53 @@ function TeamTaskBoard({ team, onDismiss }: Props) {
           <span className={styles.goalText}>{liveTeam.goal}</span>
         </div>
 
-        <div className={styles.subtaskList}>
-          {liveTeam.subtasks.map((sub) => (
-            <div
-              key={sub.id}
-              className={`${styles.subtaskRow} ${sub.status === "running" ? styles.subtaskActive : ""}`}
-            >
-              <span
-                className={styles.subtaskIcon}
-                style={{ color: STATUS_COLOR[sub.status] }}
-              >
-                {STATUS_ICON[sub.status]}
-              </span>
-              <span
-                className={styles.agentDot}
-                style={{ backgroundColor: sub.agentColor }}
-              />
-              <span className={styles.agentName}>{sub.agent}</span>
-              <span className={styles.subtaskDesc}>{sub.description}</span>
-              {sub.status === "done" && sub.result && (
-                <span className={styles.subtaskResult} title={sub.result}>
-                  {sub.result.slice(0, 40)}
-                  {sub.result.length > 40 ? "…" : ""}
-                </span>
-              )}
-              {sub.status === "running" && <span className={styles.spinner} />}
-            </div>
-          ))}
-        </div>
+        {isPlanning && (
+          <div className={styles.planningRow}>
+            <span className={styles.spinner} />
+            <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>
+              Team Lead 正在分析任务并分派子任务...
+            </span>
+          </div>
+        )}
 
-        {liveTeam.status === "running" && (
+        {liveTeam.error && (
+          <div className={styles.errorRow}>{liveTeam.error}</div>
+        )}
+
+        {liveTeam.subtasks.length > 0 && (
+          <div className={styles.subtaskList}>
+            {liveTeam.subtasks.map((sub) => (
+              <div
+                key={sub.id}
+                className={`${styles.subtaskRow} ${sub.status === "running" ? styles.subtaskActive : ""}`}
+              >
+                <span
+                  className={styles.subtaskIcon}
+                  style={{ color: STATUS_COLOR[sub.status] }}
+                >
+                  {STATUS_ICON[sub.status]}
+                </span>
+                <span
+                  className={styles.agentDot}
+                  style={{ backgroundColor: sub.agentColor }}
+                />
+                <span className={styles.agentName}>{sub.agent}</span>
+                <span className={styles.subtaskDesc}>{sub.description}</span>
+                {sub.status === "done" && sub.result && (
+                  <span className={styles.subtaskResult} title={sub.result}>
+                    {sub.result.slice(0, 40)}
+                    {sub.result.length > 40 ? "…" : ""}
+                  </span>
+                )}
+                {sub.status === "running" && (
+                  <span className={styles.spinner} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {isActive && total > 0 && (
           <div className={styles.progressBar}>
             <div className={styles.progressFill} style={{ width: `${pct}%` }} />
           </div>

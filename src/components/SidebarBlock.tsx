@@ -8,6 +8,8 @@ interface SidebarBlockProps {
   status?: BlockStatus;
   title?: string;
   badge?: string;
+  /** Override the config icon with a ReactNode (e.g. SVG) */
+  iconNode?: ReactNode;
   /** Collapsible: controlled externally */
   collapsed?: boolean;
   onToggle?: () => void;
@@ -21,6 +23,7 @@ function SidebarBlock({
   status = "idle",
   title,
   badge,
+  iconNode,
   collapsed,
   onToggle,
   children,
@@ -55,23 +58,30 @@ function SidebarBlock({
       />
 
       {/* Header */}
-      <div className={styles.header}>
+      <div
+        className={styles.header}
+        onClick={onToggle}
+        style={onToggle ? { cursor: "pointer" } : undefined}
+      >
         <div className={styles.headerLeft}>
           {onToggle !== undefined && (
-            <button className={styles.toggleBtn} onClick={onToggle}>
-              <span
-                className={`${styles.toggleArrow} ${!collapsed ? styles.toggleArrowOpen : ""}`}
-              >
-                ▶
-              </span>
-            </button>
+            <span
+              className={`${styles.toggleArrow} ${!collapsed ? styles.toggleArrowOpen : ""}`}
+              style={{
+                display: "inline-block",
+                padding: "2px 4px",
+                fontSize: 8,
+              }}
+            >
+              ▶
+            </span>
           )}
-          {config.icon && (
+          {(iconNode || config.icon) && (
             <span
               className={styles.headerIcon}
               style={{ color: titleColor(type) }}
             >
-              {config.icon}
+              {iconNode ?? config.icon}
             </span>
           )}
           <span

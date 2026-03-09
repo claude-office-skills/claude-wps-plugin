@@ -20,12 +20,12 @@ context:
 
 ```javascript
 function CL(c){var s="";while(c>0){c--;s=String.fromCharCode(65+(c%26))+s;c=Math.floor(c/26);}return s;}
-var wb = ActiveWorkbook;
-var srcWs = ActiveSheet;
+var wb = Application.ActiveWorkbook;
+var srcWs = Application.ActiveSheet;
 var srcName = srcWs.Name;
 
 wb.Sheets.Add();
-var ws = wb.ActiveSheet;
+var ws = Application.ActiveSheet;
 ws.Name = "数据分析";
 ws.Activate();
 

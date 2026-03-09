@@ -36,6 +36,10 @@ const yaml = require("js-yaml");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// ── v3.2.0: Direct API client for light tier (bypass CLI cold start) ────
+import * as directApi from "./lib/direct-api-client.js";
+const USE_DIRECT_API = process.env.USE_DIRECT_API !== "false";
+
 // ── v2.2.0: Soul + Memory + Config ──────────────────────────
 import {
   loadSoul,
@@ -219,12 +223,14 @@ function matchSkills(allSkills, userMessage, wpsContext, mode, maxLoad) {
 
   const result = [];
   let totalBodyLen = 0;
-  const BODY_BUDGET = 12000;
+  const BODY_BUDGET = 24000;
 
   for (const entry of scored) {
     if (result.length >= limit) break;
+    const isHighPriority = (Number(entry.skill.context?.priority) || 0) >= 100;
     if (
       entry.skill.context?.always ||
+      isHighPriority ||
       totalBodyLen + entry.bodyLen <= BODY_BUDGET
     ) {
       result.push(entry.skill);
@@ -237,6 +243,30 @@ function matchSkills(allSkills, userMessage, wpsContext, mode, maxLoad) {
 
 const CHART_STYLE_OVERRIDE = `
 ## 图表创建（关键！请严格遵守）
+
+### 0. 核心原则 — 不修改用户原始数据
+
+**绝对禁止修改用户原有 Sheet 上的任何数据！**
+- 图表和辅助数据应创建在**新建的 Sheet**（如 "图表分析"）上
+- 从原始 Sheet 读取数据，写入到新 Sheet，然后在新 Sheet 上创建图表
+- 如果用户明确要求在原 Sheet 上添加图表，则辅助数据写到 AA 列之后
+
+\`\`\`javascript
+// 推荐模式：新建 Sheet 放图表
+var srcWs = Application.ActiveSheet;
+var srcData = srcWs.Range("A1:H20").Value2; // 读取原始数据
+var wb = Application.ActiveWorkbook;
+var chartWs;
+try {
+  chartWs = wb.Sheets.Item("图表分析");
+  chartWs.UsedRange.Clear(); // 清空旧内容
+} catch(e) {
+  chartWs = wb.Sheets.Add(null, wb.Sheets.Item(wb.Sheets.Count));
+  chartWs.Name = "图表分析";
+}
+chartWs.Activate();
+// 在 chartWs 上写数据和创建图表...
+\`\`\`
 
 ### 1. API 兼容性（必须遵守，否则图表创建失败）
 
@@ -312,7 +342,7 @@ var chartLeft = Math.max(dataEndCol * 72, 500); // 72px ≈ 1列宽度
 \`\`\`javascript
 function setSeriesColor(chart, idx, bgr, w) {
   try {
-    var s = chart.SeriesCollection(idx);
+    var s = chart.SeriesCollection.Item(idx);
     try { s.Border.Color = bgr; s.Border.Weight = w || 2.5; } catch(e) {}
     try { s.Format.Line.ForeColor.RGB = bgr; s.Format.Line.Weight = w || 2.5; } catch(e) {}
   } catch(e) {}
@@ -518,24 +548,54 @@ const _STATIC_CORE_PROMPT = `你是 Claude，嵌入在 WPS Office Excel 中的 A
 ## 字体颜色
 设置 Interior.Color 时必须同时设置 Font.Color（深色背景→白字，浅色背景→黑字）
 
+## ⚠️ 空值安全（每次写表格必须遵守）
+每个 javascript 代码块**开头必须**写以下空值检查，否则会出现 "Cannot set properties of null" 崩溃：
+\`\`\`
+var wb = Application.ActiveWorkbook;
+if (!wb) { return "错误：请先打开工作簿"; }
+var ws = Application.ActiveSheet || wb.Sheets.Item(1);
+if (!ws) { return "错误：无法获取工作表"; }
+\`\`\`
+
 `;
 
 const _STATIC_CAPABILITY_PROMPT = `## 万物皆可代码 — 执行能力
 
-### 快捷 JSON 指令
+### Excel 快捷 JSON 指令
 格式：\`\`\`json {"_action": "<操作名>", "_args": {<参数>}} \`\`\`
-Excel: fillColor / setFontColor / clearRange / insertFormula / batchFormula / sortRange / autoFilter / freezePane / createSheet / setValue / setColumnWidth / mergeCells
-本地: local.browser.open|tabs / local.finder.open|selection / local.apps.launch|quit|list / local.calendar.list|create / local.contacts.search / local.mail.send|unread / local.reminders.list|create / local.clipboard.get|set / local.system.info
+操作: fillColor / setFontColor / clearRange / insertFormula / batchFormula / sortRange / autoFilter / freezePane / createSheet / setValue / setColumnWidth / mergeCells
+注意: JSON 指令**仅限 Excel 操作**，所有本地/系统操作必须用 bash 代码。
 
 ### 多语言代码执行
 | 标记 | 用途 | 环境 |
 |------|------|------|
 | javascript | Excel 操作 | WPS Plugin Host |
 | python | 数据分析/爬虫 | 本地 Python3 |
-| bash/terminal | Shell/系统管理 | 本地 Shell |
+| bash/terminal | 系统操作/Shell | 本地 macOS Shell |
 | html | 交互图表/仪表盘 | 浏览器预览 |
 
-选择原则：万物皆可代码。简单系统交互直接 JSON 指令，不需要解释。
+### 本地系统操作（必须用 bash 代码块）
+所有本地/系统操作**必须**用 \`\`\`bash 代码块，不要用 JSON。示例：
+- 剪贴板读取: \`pbpaste\`　写入: \`echo "内容" | pbcopy\`
+- 打开浏览器: \`open "https://url"\` 或 \`open -a "Google Chrome" "https://url"\`
+- 打开文件/目录: \`open /path/to/file\`
+- 启动应用: \`open -a "应用名"\`　退出: \`osascript -e 'tell app "应用名" to quit'\`
+- 运行中的应用: \`ps aux | grep -i app\` 或 \`osascript -e 'tell app "System Events" to name of every process whose background only is false'\`
+- 系统信息: \`uname -a && hostname && whoami && uptime\`
+- 日历/提醒/邮件/通讯录: 用 osascript (AppleScript)
+
+### 数据流：Python/Bash → Excel
+当用 python/bash 抓取或分析数据后，系统会自动将结果回传。收到执行结果后，请：
+1. 解析结果数据
+2. 生成 javascript 代码（WPS ET API）将数据写入 Excel 表格
+3. 包含表头、格式化（列宽、对齐、自动筛选等）
+
+### html 图表说明
+html 代码块会在浏览器中预览（不会插入 Excel），适合交互式可视化。
+如需在 Excel 内创建图表，请使用 javascript + WPS Chart API（AddChart2）。
+**重要：创建图表时，在新 Sheet 上操作，不要修改用户原始数据所在的 Sheet。**
+
+选择原则：万物皆可代码。Excel 操作用 JSON 或 javascript，系统/本地操作**一律用 bash**。
 
 `;
 
@@ -546,12 +606,58 @@ Excel: fillColor / setFontColor / clearRange / insertFormula / batchFormula / so
  * 返回 "light" | "standard" | "heavy"
  */
 function estimatePromptTier(userMessage, messages) {
-  const msgLen = (userMessage || "").length;
+  const msg = (userMessage || "").trim();
+  const msgLow = msg.toLowerCase();
+  const msgLen = msg.length;
 
-  if (msgLen < 30) return "light";
-  if (msgLen < 300) return "standard";
-  return "heavy";
+  const HEAVY_KEYWORDS =
+    /dcf|估值模型|建模|财务模型|完整.*模型|多.*sheet|多.*表|分析.*报告|敏感性分析|情景分析|scenario/i;
+  if (HEAVY_KEYWORDS.test(msg) || msgLen > 300) {
+    _logTier(msg, "heavy", "HEAVY_KW");
+    return "heavy";
+  }
+
+  const GREETING =
+    /^(你好|hi|hello|hey|嗨|谢谢|thanks?|thank you|ok|好的|收到|明白|了解|知道了|嗯|对|是的|没错|不是|test|测试|你是谁|what are you|who are you)[\s!！。.？?]*$/i;
+  if (GREETING.test(msg)) {
+    _logTier(msg, "light", "GREETING");
+    return "light";
+  }
+
+  const PURE_QUESTION =
+    /^(什么是|是什么|怎么用|如何使用|请问|解释一下|explain|what is|how to|为什么)/i;
+  if (msgLen < 50 && PURE_QUESTION.test(msg)) {
+    _logTier(msg, "light", "PURE_Q");
+    return "light";
+  }
+
+  _logTier(msg, "standard", "DEFAULT");
+  return "standard";
 }
+// #region agent log
+const _fs34f850 = require("fs");
+const _logPath34f850 = "/Users/kingsoft/需求讨论/.cursor/debug-34f850.log";
+function _logTier(msg, tier, reason) {
+  try {
+    _fs34f850.appendFileSync(
+      _logPath34f850,
+      JSON.stringify({
+        sessionId: "34f850",
+        location: "proxy-server.js:estimatePromptTier",
+        message: "tier-classification",
+        data: {
+          userMsg: msg.substring(0, 80),
+          tier,
+          reason,
+          msgLen: msg.length,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H-TIER",
+      }) + "\n",
+    );
+  } catch (e) {}
+}
+// #endregion
 
 function buildSystemPrompt(skills, todayStr, userMessage, modeSkill, messages) {
   const tier = estimatePromptTier(userMessage, messages || []);
@@ -600,6 +706,27 @@ function buildSystemPrompt(skills, todayStr, userMessage, modeSkill, messages) {
   console.log(
     `[prompt] tier=${tier}, skills=${skills.length}, chars=${prompt.length}`,
   );
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "eab716",
+    },
+    body: JSON.stringify({
+      sessionId: "eab716",
+      location: "proxy-server.js:buildSystemPrompt",
+      message: "Skills loaded for prompt",
+      data: {
+        tier,
+        skillCount: skills.length,
+        skillNames: skills.map((s) => s.name),
+        promptChars: prompt.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   return prompt;
 }
 
@@ -907,9 +1034,12 @@ app.post("/extract-pdf", async (req, res) => {
 
     const uint8 = new Uint8Array(buffer);
     const parser = new pdfParse.PDFParse(uint8);
+    // load() must be called before getText()
+    await parser.load();
     const data = await parser.getText();
-    const text = data.text || "";
-    const pages = data.total || data.pages?.length || 0;
+    const text = (typeof data === "string" ? data : data?.text) || "";
+    const pages =
+      data?.total || data?.pages?.length || parser.getInfo?.()?.numPages || 0;
 
     const MAX_CHARS = 100000;
     const truncated = text.length > MAX_CHARS;
@@ -1190,12 +1320,12 @@ app.post("/v3/agents/reload", (_req, res) => {
 
 // ── v3.2: Agent Team API ─────────────────────────────────────
 
-app.post("/v3/team/start", async (req, res) => {
+app.post("/v3/team/start", (req, res) => {
   const { goal, context } = req.body || {};
   if (!goal) return res.status(400).json({ ok: false, error: "goal required" });
 
   try {
-    const team = await startTeam(goal, context);
+    const team = startTeam(goal, context);
     res.json({ ok: true, team });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1885,6 +2015,27 @@ app.post("/execute-code", async (req, res) => {
   const { code, agentId, force } = req.body;
   if (!code) return res.status(400).json({ error: "code 不能为空" });
 
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "f532b6",
+    },
+    body: JSON.stringify({
+      sessionId: "f532b6",
+      location: "proxy-server.js:execute-code",
+      message: "Code execution request",
+      data: {
+        force: !!force,
+        codeLen: code.length,
+        codeSnippet: code.substring(0, 80),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   // v3.2: PreCodeExecute Hook — 危险操作拦截（force=true 时用户已确认，跳过）
   if (!force) {
     const preHook = runHooks("PreCodeExecute", {
@@ -1893,6 +2044,25 @@ app.post("/execute-code", async (req, res) => {
     });
     if (preHook.blocked) {
       console.log(`[hook] PreCodeExecute BLOCKED: ${preHook.reason}`);
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "f532b6",
+          },
+          body: JSON.stringify({
+            sessionId: "f532b6",
+            location: "proxy-server.js:execute-code-blocked",
+            message: "Code blocked by hook",
+            data: { reason: preHook.reason },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       return res.json({ blocked: true, reason: preHook.reason });
     }
     if (preHook.logs.length > 0) {
@@ -1918,8 +2088,12 @@ app.post("/execute-code", async (req, res) => {
               `[agent-perm] BLOCKED: ${actionName} not in ${sessionAgent.name}'s tools [${sessionAgent.tools.join(",")}]`,
             );
             return res.json({
-              result: `⚠️ ${sessionAgent.name} 没有执行 ${actionName} 的权限。请切换到合适的 Agent。`,
-              diff: null,
+              ok: true,
+              id: `perm-${Date.now()}`,
+              localResult: {
+                ok: false,
+                error: `⚠️ ${sessionAgent.name} 没有执行 ${actionName} 的权限。请切换到合适的 Agent。`,
+              },
             });
           }
         } catch {}
@@ -1997,6 +2171,26 @@ app.post("/execute-code", async (req, res) => {
   }
 
   const parentId = `exec-${++_codeIdCounter}-${Date.now()}`;
+  // #region agent log
+  try {
+    _fs34f850.appendFileSync(
+      _logPath34f850,
+      JSON.stringify({
+        sessionId: "34f850",
+        location: "proxy-server.js:execute-code-js",
+        message: "JS code queued for WPS",
+        data: {
+          parentId,
+          codeLen: code.length,
+          codeFirst200: code.substring(0, 200),
+          codeLast100: code.substring(Math.max(0, code.length - 100)),
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H-TRANSLATE",
+      }) + "\n",
+    );
+  } catch (e) {}
+  // #endregion
 
   let cleanCode = code.replace(/\/\/\s*---ROW---/g, "");
 
@@ -2033,12 +2227,77 @@ app.post("/execute-code", async (req, res) => {
       return match;
     },
   );
+  // Columns/Rows 安全网：ws.Columns("D:D") → ws.Range("D:D")
+  cleanCode = cleanCode.replace(
+    /\.Columns\(\s*"([A-Z]+:[A-Z]+)"\s*\)/g,
+    '.Range("$1")',
+  );
+  cleanCode = cleanCode.replace(
+    /\.Columns\(\s*"([A-Z]+)"\s*\)/g,
+    '.Range("$1:$1")',
+  );
+  cleanCode = cleanCode.replace(/\.Rows\(\s*"(\d+:\d+)"\s*\)/g, '.Range("$1")');
+  cleanCode = cleanCode.replace(/\.Rows\(\s*(\d+)\s*\)/g, '.Range("$1:$1")');
+
+  // WPS JSAPI 集合访问安全网：.SeriesCollection(n) → .SeriesCollection.Item(n)
+  cleanCode = cleanCode.replace(
+    /\.SeriesCollection\(\s*(\d+)\s*\)/g,
+    ".SeriesCollection.Item($1)",
+  );
+
+  // WPS JSAPI Cells 安全网：ws.Cells(row, col) → ws.Cells.Item(row, col)
+  cleanCode = cleanCode.replace(
+    /\.Cells\(\s*([^)]+?)\s*,\s*([^)]+?)\s*\)/g,
+    ".Cells.Item($1, $2)",
+  );
+
+  // WPS JSAPI ActiveSheet/ActiveWorkbook 安全网
+  // lookbehind: 不匹配 Application.ActiveSheet / wb.ActiveSheet（已有对象前缀）
+  cleanCode = cleanCode.replace(
+    /(?<!\.)(?<!\w)ActiveSheet\b/g,
+    "Application.ActiveSheet",
+  );
+  cleanCode = cleanCode.replace(
+    /(?<!\.)(?<!\w)ActiveWorkbook\b/g,
+    "Application.ActiveWorkbook",
+  );
+
+  // Cells.Clear → UsedRange.Clear 安全网
+  cleanCode = cleanCode.replace(/\.Cells\.Clear\(\)/g, ".UsedRange.Clear()");
+
+  // finance-data API 响应路径安全网：data.data.X → data.X（API 返回平坦 JSON）
+  cleanCode = cleanCode.replace(
+    /\b(data|resp|result|json)\.(data)\.(summary|keyStats|incomeStatements|balanceSheets|cashFlows|ticker|fetchedAt)\b/g,
+    "$1.$3",
+  );
+
   // 添加运行时 NaN 守卫函数，AI 代码中的数值赋值会被自动保护
   const nanGuard = `function _n(v){return(typeof v==="number"&&isNaN(v))?0:v===undefined?0:v===null?0:v;}\n`;
   if (/\.Value2?\s*=/.test(cleanCode) && !/function _n/.test(cleanCode)) {
     cleanCode = nanGuard + cleanCode;
   }
 
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "eab716",
+    },
+    body: JSON.stringify({
+      sessionId: "eab716",
+      location: "proxy-server.js:queue-push",
+      message: "Pushing JS code to queue",
+      data: {
+        parentId,
+        codeLen: cleanCode.length,
+        codeHead: cleanCode.substring(0, 120),
+        queueLen: _codeQueue.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   _codeQueue.push({
     id: parentId,
     code: cleanCode,
@@ -2058,6 +2317,30 @@ app.get("/pending-code", (req, res) => {
 
 app.post("/code-result", (req, res) => {
   const { id, result, error, diff } = req.body;
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "eab716",
+    },
+    body: JSON.stringify({
+      sessionId: "eab716",
+      location: "proxy-server.js:code-result-received",
+      message: "WPS sent code result",
+      data: {
+        id,
+        hasResult: !!result,
+        resultLen: result?.length,
+        hasError: !!error,
+        errorMsg: error?.substring?.(0, 200),
+        hasDiff: !!diff,
+        diffChanges: diff?.changeCount,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (!id) return res.status(400).json({ error: "id 不能为空" });
 
   const chunkMatch = id.match(/^(.+)_chunk_\d+$/);
@@ -2356,7 +2639,7 @@ async function _extractAndStoreMemory(userMsg, assistantResponse) {
 }
 
 // ── 聊天接口（SSE 流式响应）──────────────────────────────────
-app.post("/chat", (req, res) => {
+app.post("/chat", async (req, res) => {
   const now = Date.now();
   if (_activeChats >= CHAT_CONCURRENCY_MAX) {
     return res.status(429).json({ error: "当前并发请求过多，请稍后重试" });
@@ -2552,6 +2835,8 @@ app.post("/chat", (req, res) => {
     }
   }
 
+  const systemOnlyPrompt = fullPrompt;
+
   if (messages.length > 1) {
     fullPrompt += "[对话历史]\n";
     messages.slice(0, -1).forEach((m) => {
@@ -2594,6 +2879,747 @@ app.post("/chat", (req, res) => {
 
   const promptTier = estimatePromptTier(lastUserMsg, messages);
 
+  // ── v3.2.0: Direct API fast path for light tier ────────────
+  //    Bypasses CLI cold start (~15s) for simple queries.
+  //    Falls back to CLI on any error. Disable with USE_DIRECT_API=false.
+  //    Note: Step execution stays on CLI (model needs prompt caching for 30K+ prompts).
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "abaffc",
+    },
+    body: JSON.stringify({
+      sessionId: "abaffc",
+      location: "proxy-server.js:route-decision",
+      message: "Direct API routing check",
+      data: {
+        promptTier,
+        USE_DIRECT_API,
+        directApiReady: directApi.isReady(),
+        currentMode,
+        willUseDirectApi:
+          promptTier === "light" &&
+          USE_DIRECT_API &&
+          directApi.isReady() &&
+          currentMode !== "team",
+        lastUserMsgPrefix: (lastUserMsg || "").substring(0, 80),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/654d9aa3-fbba-48f2-b4ce-e7b9fc0ed511", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "abaffc",
+    },
+    body: JSON.stringify({
+      sessionId: "abaffc",
+      location: "proxy-server.js:route-decision-abaffc",
+      message: "Route decision for this request",
+      data: {
+        promptTier,
+        currentMode,
+        webSearch: !!webSearch,
+        model: model || "default",
+        hasStepMarker: /请执行以下步骤（仅这一步）/.test(lastUserMsg || ""),
+        lastUserMsgPrefix: (lastUserMsg || "").substring(0, 120),
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H1-stepExec-regex",
+    }),
+  }).catch(() => {});
+  // #endregion
+  if (
+    promptTier === "light" &&
+    USE_DIRECT_API &&
+    directApi.isReady() &&
+    currentMode !== "team"
+  ) {
+    const apiStartTime = Date.now();
+    let apiSystemPrompt = _STATIC_CORE_PROMPT.replace(
+      "你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。",
+      `你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。\n今天是 ${todayStr}。`,
+    );
+    apiSystemPrompt += _STATIC_CAPABILITY_PROMPT;
+    if (context)
+      apiSystemPrompt += `\n[当前 Excel 上下文]\n${smartSampleContext(context)}\n`;
+
+    const apiMessages = [];
+    if (messages.length > 1) {
+      messages.slice(-3, -1).forEach((m) => {
+        apiMessages.push({
+          role: m.role === "user" ? "user" : "assistant",
+          content: m.content,
+        });
+      });
+    }
+    // Build last user message — add image attachments as vision content blocks
+    const lastUserContent = messages[messages.length - 1].content;
+    const imageAttsForApi = Array.isArray(attachments)
+      ? attachments.filter((a) => a.type === "image" && a.tempPath)
+      : [];
+    const textAttsForApi = Array.isArray(attachments)
+      ? attachments.filter((a) => a.type !== "image")
+      : [];
+
+    if (textAttsForApi.length > 0) {
+      let textPrefix = "[用户附件]\n";
+      textAttsForApi.forEach((a) => {
+        textPrefix += `--- ${a.name} ---\n${a.content}\n\n`;
+      });
+      apiSystemPrompt += textPrefix;
+    }
+
+    if (imageAttsForApi.length > 0) {
+      // Build multipart content for vision
+      const contentBlocks = [{ type: "text", text: lastUserContent }];
+      for (const att of imageAttsForApi) {
+        try {
+          if (!isPathSafe(att.tempPath, TEMP_DIR)) continue;
+          const imgBuf = readFileSync(att.tempPath);
+          const ext = att.name?.split(".").pop()?.toLowerCase() || "png";
+          const mime =
+            {
+              jpg: "jpeg",
+              jpeg: "jpeg",
+              png: "png",
+              gif: "gif",
+              webp: "webp",
+              bmp: "bmp",
+            }[ext] || "png";
+          contentBlocks.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: `image/${mime}`,
+              data: imgBuf.toString("base64"),
+            },
+          });
+        } catch (e) {
+          console.warn(`[direct-api] image read failed: ${e.message}`);
+        }
+      }
+      apiMessages.push({ role: "user", content: contentBlocks });
+    } else {
+      apiMessages.push({ role: "user", content: lastUserContent });
+    }
+
+    const abortController = new AbortController();
+    const apiTimeout = setTimeout(() => abortController.abort(), 10_000);
+
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "abaffc",
+      },
+      body: JSON.stringify({
+        sessionId: "abaffc",
+        location: "proxy-server.js:direct-api-start",
+        message: "Starting Direct API for light tier",
+        data: {
+          model: selectedModel,
+          systemPromptLen: apiSystemPrompt.length,
+          msgCount: apiMessages.length,
+          timeoutMs: 10000,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    try {
+      const keepaliveApi = setInterval(() => {
+        if (!res.writableEnded) res.write(`: keepalive ${Date.now()}\n\n`);
+      }, 5000);
+
+      const result = await directApi.streamChat({
+        systemPrompt: apiSystemPrompt,
+        messages: apiMessages,
+        model: selectedModel,
+        maxTokens: 4096,
+        signal: abortController.signal,
+        onEvent: (evt) => {
+          if (res.writableEnded) return;
+          // #region agent log
+          if (evt.type === "token" || evt.type === "thinking") {
+            fetch(
+              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "abaffc",
+                },
+                body: JSON.stringify({
+                  sessionId: "abaffc",
+                  location: "proxy-server.js:onEvent-directApi",
+                  message: `Direct API SSE: ${evt.type}`,
+                  data: {
+                    type: evt.type,
+                    textLen: evt.text?.length || 0,
+                    elapsedMs: Date.now() - apiStartTime,
+                  },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+          }
+          // #endregion
+          res.write(`data: ${JSON.stringify(evt)}\n\n`);
+        },
+      });
+
+      clearTimeout(apiTimeout);
+      clearInterval(keepaliveApi);
+
+      console.log(
+        `[direct-api] ✅ ${selectedModel} totalMs=${result.totalMs} ttFirst=${result.ttFirstToken} chars=${result.resultText.length} thinkingChars=${result.thinkingText?.length ?? 0}`,
+      );
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "abaffc",
+          },
+          body: JSON.stringify({
+            sessionId: "abaffc",
+            location: "proxy-server.js:direct-api-done",
+            message: "Direct API done",
+            data: {
+              resultTextLen: result.resultText.length,
+              thinkingTextLen: result.thinkingText?.length ?? 0,
+              totalMs: result.totalMs,
+              ttFirstToken: result.ttFirstToken,
+              model: selectedModel,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+
+      if (!res.writableEnded) {
+        const doneEvt = {
+          type: "done",
+          fullText: result.resultText,
+          provenance: {
+            mode: currentMode,
+            model: selectedModel,
+            skillsLoaded: allMatched.map((s) => s.name),
+            promptSummary: lastUserMsg?.substring(0, 50),
+            timestamp: Date.now(),
+          },
+        };
+        res.write(`data: ${JSON.stringify(doneEvt)}\n\n`);
+        res.end();
+      }
+      _activeChats--;
+      return;
+    } catch (apiErr) {
+      clearTimeout(apiTimeout);
+      const fallbackMs = Date.now() - apiStartTime;
+      console.warn(
+        `[direct-api] ⚠️ Falling back to CLI: ${apiErr.message} (${fallbackMs}ms)`,
+      );
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "abaffc",
+          },
+          body: JSON.stringify({
+            sessionId: "abaffc",
+            location: "proxy-server.js:direct-api-fallback",
+            message: "Direct API failed, falling back to CLI",
+            data: {
+              errMsg: apiErr.message,
+              errName: apiErr.name,
+              fallbackMs,
+              model: selectedModel,
+              promptTier,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H1",
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+    }
+  }
+
+  // ── Plan-first path: 复杂任务先用 Direct API 快速生成计划 ────
+  // 参考 Cursor Plan Mode / Claude Code TodoWrite / Manus PlanningAgent
+  // 用 Haiku 快速分类：任务是否需要多步骤规划（取代硬编码关键词）
+  const isStepExecution =
+    /(\[前序步骤结果\]|请执行以下步骤（仅这一步）|\[执行结果\s*\d+\/\d+\]|代码执行出错（自动重试\s*\d+\/\d+）)/.test(
+      (lastUserMsg || "").trim(),
+    );
+  const PLAN_REQUIRED_KW =
+    /dcf|估值模型|建模|财务模型|完整.*模型|多.*sheet|多.*表|分析.*报告|敏感性分析|情景分析|scenario/i;
+  const kwPlanMatch = PLAN_REQUIRED_KW.test(lastUserMsg || "");
+
+  let isPlanFirstCandidate = false;
+  if (
+    !isStepExecution &&
+    (promptTier === "standard" || promptTier === "heavy") &&
+    currentMode !== "plan" &&
+    currentMode !== "ask"
+  ) {
+    if (kwPlanMatch) {
+      isPlanFirstCandidate = true;
+      console.log(
+        `[classify] Keyword match → isPlanFirst=true for: ${(lastUserMsg || "").substring(0, 50)}`,
+      );
+    } else if (USE_DIRECT_API && directApi.isReady()) {
+      try {
+        const classifyAbort = new AbortController();
+        const classifyTimer = setTimeout(() => classifyAbort.abort(), 8000);
+        let classifyResult = "";
+        await directApi.streamChat({
+          systemPrompt:
+            "你是任务复杂度分类器。判断用户任务是否需要分步骤规划才能完成。\n" +
+            "需要规划(YES)：涉及多个依赖步骤的复杂任务，如DCF建模、跨多表关联分析、多阶段工作流、需要先收集数据再计算再验证等。\n" +
+            "不需要规划(NO)：单步可完成的任务，如搜索信息并列表、生成一张表格、简单计算、格式设置、画一个图表、写公式、翻译、问答等。\n" +
+            "只回复 YES 或 NO，不要解释。",
+          messages: [{ role: "user", content: lastUserMsg }],
+          model: "haiku",
+          maxTokens: 8,
+          signal: classifyAbort.signal,
+          onEvent: (evt) => {
+            if (evt.type === "token") classifyResult += evt.text;
+          },
+        });
+        clearTimeout(classifyTimer);
+        isPlanFirstCandidate = /yes/i.test(classifyResult.trim());
+        console.log(
+          `[classify] Haiku says "${classifyResult.trim()}" → isPlanFirst=${isPlanFirstCandidate} for: ${(lastUserMsg || "").substring(0, 50)}`,
+        );
+      } catch (classifyErr) {
+        console.log(
+          `[classify] Failed (${classifyErr.message}), skipping plan-first`,
+        );
+        isPlanFirstCandidate = false;
+      }
+    }
+  }
+
+  // #region agent log - console fallback
+  console.log(
+    `[route] isStepExec=${isStepExecution} isPlanFirst=${isPlanFirstCandidate} tier=${promptTier} msg="${(lastUserMsg || "").substring(0, 80).replace(/\n/g, "↵")}"`,
+  );
+  // #endregion
+  // #region agent log
+  fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "eab716",
+    },
+    body: JSON.stringify({
+      sessionId: "eab716",
+      location: "proxy-server.js:route-decision",
+      message: "Routing decision",
+      data: {
+        isStepExecution,
+        isPlanFirstCandidate,
+        kwPlanMatch,
+        promptTier,
+        directApiReady: USE_DIRECT_API && directApi.isReady(),
+        msgSnippet: (lastUserMsg || "").substring(0, 60),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
+  if (isPlanFirstCandidate) {
+    const apiStartPlan = Date.now();
+    try {
+      let planText = "";
+      const directApiOk = USE_DIRECT_API && directApi.isReady();
+
+      if (directApiOk) {
+        try {
+          console.log(
+            `[plan-first] Generating plan via Direct API for: ${lastUserMsg.substring(0, 60)}...`,
+          );
+
+          const plannerAgent = getAgentByName("planner");
+          const plannerSystemPrompt = plannerAgent
+            ? plannerAgent.systemPrompt +
+              "\n\n**重要**: 只输出编号步骤列表（1. 2. 3. ...），每步不超过 20 字。不要输出完整的计划文档。"
+            : "你是一个任务规划助手。只输出结构化的步骤列表，不要输出代码或其他解释。";
+
+          let planUserMsg = `用户要求:\n\n"${lastUserMsg}"\n\n`;
+          if (context) {
+            planUserMsg += `[当前工作簿上下文]\n${smartSampleContext(context)}\n\n`;
+          }
+          planUserMsg +=
+            `请将这个任务分解为 3-8 个可独立执行的步骤。\n` +
+            `输出格式（严格遵守）:\n` +
+            `1. 步骤描述\n2. 步骤描述\n...\n\n` +
+            `规则:\n- 每步不超过 20 个字\n- 第一步通常是准备数据/框架\n- 最后一步是验证和总结\n- 不要输出其他内容，只输出编号列表`;
+
+          const planAbort = new AbortController();
+          const planTimeout = setTimeout(() => planAbort.abort(), 75000);
+
+          await directApi.streamChat({
+            systemPrompt: plannerSystemPrompt,
+            messages: [{ role: "user", content: planUserMsg }],
+            model: plannerAgent?.model || "sonnet",
+            maxTokens: 1024,
+            signal: planAbort.signal,
+            onEvent: (evt) => {
+              if (evt.type === "token") planText += evt.text;
+            },
+          });
+          clearTimeout(planTimeout);
+        } catch (apiPlanErr) {
+          console.warn(
+            `[plan-first] Direct API plan failed: ${apiPlanErr.message}, trying template fallback`,
+          );
+          planText = "";
+        }
+      }
+
+      if (!planText && /dcf|估值模型|财务模型/i.test(lastUserMsg || "")) {
+        console.log(`[plan-first] Using DCF template`);
+        const companyHint =
+          (lastUserMsg || "")
+            .replace(/^.*?(新建|创建|生成|做|帮我)/, "")
+            .replace(/(dcf|DCF|分析|估值|模型|报告)/gi, "")
+            .trim() || "目标公司";
+        planText =
+          `1. 创建工作簿框架和"关键假设"Sheet\n` +
+          `2. 搜集${companyHint}历史财务数据并填入"历史数据"Sheet\n` +
+          `3. 建立营收预测模型（公式驱动）\n` +
+          `4. 建立利润表和现金流预测（引用假设表参数）\n` +
+          `5. 构建DCF估值模型（WACC/终值/折现）\n` +
+          `6. 添加敏感性分析表\n` +
+          `7. 格式化和交叉验证所有公式`;
+      } else if (!planText) {
+        console.log(`[plan-first] No plan generated and no template match`);
+      }
+
+      const planSteps = parsePlanSteps(planText);
+      if (planSteps.length >= 2) {
+        console.log(
+          `[plan-first] ✅ Generated ${planSteps.length} steps in ${Date.now() - apiStartPlan}ms`,
+        );
+
+        // #region agent log
+        fetch(
+          "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "eab716",
+            },
+            body: JSON.stringify({
+              sessionId: "eab716",
+              location: "proxy-server.js:plan-first-success",
+              message: "Plan generated successfully",
+              data: {
+                stepCount: planSteps.length,
+                planText: planText.substring(0, 200),
+                elapsedMs: Date.now() - apiStartPlan,
+              },
+              timestamp: Date.now(),
+            }),
+          },
+        ).catch(() => {});
+        // #endregion
+
+        const planSummary = planSteps
+          .map((s) => `${s.index}. ${s.text}`)
+          .join("\n");
+        res.write(
+          `data: ${JSON.stringify({
+            type: "plan_created",
+            steps: planSteps,
+            originalTask: lastUserMsg,
+          })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({
+            type: "token",
+            text: `我已为您制定了执行计划：\n\n${planSummary}\n\n点击 **▶ 全部执行** 逐步完成，或点击单个步骤的 ▶ 按钮单步执行。`,
+          })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({
+            type: "done",
+            fullText: `我已为您制定了执行计划：\n\n${planSummary}\n\n点击 **▶ 全部执行** 逐步完成，或点击单个步骤的 ▶ 按钮单步执行。`,
+            provenance: {
+              mode: currentMode,
+              model: selectedModel,
+              skillsLoaded: allMatched.map((s) => s.name),
+              promptSummary: lastUserMsg.substring(0, 50),
+              timestamp: Date.now(),
+            },
+          })}\n\n`,
+        );
+        clearInterval(keepalive);
+        res.end();
+        _activeChats--;
+        return;
+      }
+    } catch (planErr) {
+      console.warn(
+        `[plan-first] ⚠️ Plan generation failed: ${planErr.name}:${planErr.message} (elapsed:${Date.now() - apiStartPlan}ms), continuing with CLI`,
+      );
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "proxy-server.js:plan-first-fail",
+            message: "Plan generation failed",
+            data: { error: planErr.message },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+    }
+  }
+
+  // ── Step Execution via Direct API: 真正的 thinking 流式传输 ────
+  // CLI 的 stream-json 不发送 thinking_delta 增量事件（只在完成后一次性返回 assistant 消息）
+  // Direct API 支持 thinking_delta 实时流式，用户可以看到 AI 思考过程
+  if (isStepExecution && USE_DIRECT_API && directApi.isReady()) {
+    const apiStepStart = Date.now();
+    console.log(
+      `[step-exec] Using Direct API for streaming thinking (step execution)`,
+    );
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "abaffc",
+      },
+      body: JSON.stringify({
+        sessionId: "abaffc",
+        location: "proxy-server.js:step-exec-direct-api",
+        message: "Step execution via Direct API",
+        data: {
+          promptTier,
+          model: selectedModel,
+          systemPromptLen: systemOnlyPrompt.length,
+          msgCount: messages.length,
+          lastMsgLen: (lastUserMsg || "").length,
+          lastMsgHead: (lastUserMsg || "").substring(0, 120),
+        },
+        timestamp: apiStepStart,
+        hypothesisId: "DirectAPI",
+      }),
+    }).catch(() => {});
+    // #endregion
+    try {
+      let stepResultText = "";
+      const stepAbort = new AbortController();
+      const stepTimeoutMs = promptTier === "heavy" ? 300_000 : 120_000;
+      const stepTimeout = setTimeout(() => stepAbort.abort(), stepTimeoutMs);
+      const keepaliveApi = setInterval(() => {
+        if (!res.writableEnded) res.write(`: keepalive ${Date.now()}\n\n`);
+      }, 5000);
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "abaffc",
+          },
+          body: JSON.stringify({
+            sessionId: "abaffc",
+            location: "proxy-server.js:step-exec-timeout-config",
+            message: "Step timeout configured",
+            data: { promptTier, stepTimeoutMs, model: selectedModel },
+            timestamp: Date.now(),
+            hypothesisId: "H-timeout",
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+
+      let _apiFirstThinkMs = 0;
+      let _apiFirstTokenMs = 0;
+      let _apiThinkChars = 0;
+
+      await directApi.streamChat({
+        systemPrompt: systemOnlyPrompt,
+        messages: messages,
+        model: selectedModel,
+        maxTokens: 16384,
+        enableThinking: true,
+        thinkingBudget: 10000,
+        signal: stepAbort.signal,
+        onEvent: (evt) => {
+          if (res.writableEnded) return;
+          if (evt.type === "thinking") {
+            if (!_apiFirstThinkMs) {
+              _apiFirstThinkMs = Date.now() - apiStepStart;
+              // #region agent log
+              fetch(
+                "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Debug-Session-Id": "abaffc",
+                  },
+                  body: JSON.stringify({
+                    sessionId: "abaffc",
+                    location: "proxy-server.js:step-exec-first-thinking",
+                    message: "First thinking delta from Direct API",
+                    data: {
+                      msFromStart: _apiFirstThinkMs,
+                      textLen: evt.text.length,
+                    },
+                    timestamp: Date.now(),
+                    hypothesisId: "DirectAPI",
+                  }),
+                },
+              ).catch(() => {});
+              // #endregion
+            }
+            _apiThinkChars += evt.text.length;
+            res.write(
+              `data: ${JSON.stringify({ type: "thinking", text: evt.text })}\n\n`,
+            );
+          } else if (evt.type === "token") {
+            if (!_apiFirstTokenMs) {
+              _apiFirstTokenMs = Date.now() - apiStepStart;
+              // #region agent log
+              fetch(
+                "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Debug-Session-Id": "abaffc",
+                  },
+                  body: JSON.stringify({
+                    sessionId: "abaffc",
+                    location: "proxy-server.js:step-exec-first-token",
+                    message: "First token from Direct API",
+                    data: {
+                      msFromStart: _apiFirstTokenMs,
+                      thinkChars: _apiThinkChars,
+                    },
+                    timestamp: Date.now(),
+                    hypothesisId: "DirectAPI",
+                  }),
+                },
+              ).catch(() => {});
+              // #endregion
+            }
+            stepResultText += evt.text;
+            res.write(
+              `data: ${JSON.stringify({ type: "token", text: evt.text })}\n\n`,
+            );
+          }
+        },
+      });
+
+      clearTimeout(stepTimeout);
+      clearInterval(keepaliveApi);
+
+      const provenance = {
+        mode: currentMode,
+        model: selectedModel,
+        skillsLoaded: allMatched.map((s) => s.name),
+        timestamp: Date.now(),
+      };
+      if (!res.writableEnded) {
+        res.write(
+          `data: ${JSON.stringify({ type: "done", fullText: stepResultText, provenance })}\n\n`,
+        );
+      }
+      clearInterval(keepalive);
+      res.end();
+      _activeChats--;
+      console.log(
+        `[step-exec] Direct API done: ${stepResultText.length} chars in ${Date.now() - apiStepStart}ms`,
+      );
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "abaffc",
+          },
+          body: JSON.stringify({
+            sessionId: "abaffc",
+            location: "proxy-server.js:step-exec-direct-api-done",
+            message: "Step execution Direct API success",
+            data: {
+              resultLen: stepResultText.length,
+              elapsedMs: Date.now() - apiStepStart,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "DirectAPI",
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+      return;
+    } catch (stepApiErr) {
+      console.warn(
+        `[step-exec] Direct API failed: ${stepApiErr.message}, falling back to CLI`,
+      );
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "abaffc",
+          },
+          body: JSON.stringify({
+            sessionId: "abaffc",
+            location: "proxy-server.js:step-exec-direct-api-fail",
+            message: "Step execution Direct API failed, falling back to CLI",
+            data: {
+              error: stepApiErr.message,
+              elapsedMs: Date.now() - apiStepStart,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "DirectAPI",
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+    }
+  }
+
   const claudePath = RESOLVED_CLAUDE_PATH;
   const maxTurns = String(
     enforcement.maxTurns || (currentMode === "ask" ? 1 : 5),
@@ -2611,9 +3637,10 @@ app.post("/chat", (req, res) => {
 
   // ── Light Tier 快速路径：
   //    用 --system-prompt 传入预缓存的核心 prompt（保留全部 Excel/代码/JSON 能力），
-  //    跳过 CLI 默认加载（CLAUDE.md + 插件 hooks + MCP 工具定义）。
+  //    --setting-sources user：只加载用户级配置（启用 Statsig 缓存 = 更快 init），
+  //    同时跳过项目级 SessionStart hook（实测节省 15-20s）。
   //    --disable-slash-commands 跳过 skills 加载（skills 在 standard/heavy tier 按需注入）。
-  //    实测：默认 CLI ~22-34s → 核心 prompt 快速路径 ~5-8s
+  //    实测：默认 CLI ~22-34s → 快速路径 ~5-9s
   if (promptTier === "light") {
     let lightPrompt = _STATIC_CORE_PROMPT.replace(
       "你的代码直接运行在 WPS Plugin Host 上下文，可同步访问完整 ET API。",
@@ -2622,18 +3649,27 @@ app.post("/chat", (req, res) => {
     lightPrompt += _STATIC_CAPABILITY_PROMPT;
     if (context)
       lightPrompt += `\n[当前 Excel 上下文]\n${smartSampleContext(context)}\n`;
-    // --setting-sources "" 跳过用户插件 hooks（尤其是 SessionStart，实测节省 15-20s）
+    // --setting-sources user：保留用户设置（Statsig 缓存）、跳过项目 SessionStart hook
     cliArgs.push(
       "--system-prompt",
       lightPrompt,
       "--disable-slash-commands",
       "--setting-sources",
-      "",
+      "user",
     );
   }
   // effort 策略：根据 prompt 复杂度 + 模式动态决定
-  // 注意：effort 仅对 Opus 4.6 生效 (https://code.claude.com/docs/en/model-config.md)
-  if (currentMode === "plan" || currentMode === "team") {
+  // 参考 Claude Code: effort 控制 Opus 4.6 的 adaptive reasoning 深度
+  // light → low, standard → medium, heavy/plan/team → high
+  const effortLevel =
+    promptTier === "heavy" || currentMode === "plan" || currentMode === "team"
+      ? "high"
+      : promptTier === "standard"
+        ? "medium"
+        : "low";
+  if (effortLevel === "high") {
+    cliArgs.push("--effort", "high");
+  } else if (effortLevel === "medium") {
     cliArgs.push("--effort", "medium");
   } else {
     cliArgs.push("--effort", "low");
@@ -2660,73 +3696,63 @@ app.post("/chat", (req, res) => {
     "NODE_PATH",
     "NVM_DIR",
     "NVM_BIN",
+    "NVM_INC",
     "CLAUDE_PATH",
     "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
   ];
-  // Light tier: 使用完整环境（与终端直接调用一致），追加优化参数
-  // Standard/Heavy tier: 使用精简 cleanEnv（安全隔离）
-  let spawnEnv;
+  const cleanEnv = {};
+  cleanEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000";
   if (promptTier === "light") {
-    spawnEnv = {
-      ...process.env,
-      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "32000",
-      CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "1",
-      MAX_THINKING_TOKENS: "500",
-    };
+    cleanEnv.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1";
+    cleanEnv.MAX_THINKING_TOKENS = "500";
+  } else if (promptTier === "standard") {
+    cleanEnv.MAX_THINKING_TOKENS = "16000";
   } else {
-    const cleanEnv = {};
-    cleanEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000";
-    if (promptTier === "standard") {
-      cleanEnv.MAX_THINKING_TOKENS = "8000";
-    }
-    for (const key of ENV_WHITELIST) {
-      if (process.env[key]) cleanEnv[key] = process.env[key];
-    }
-    spawnEnv = cleanEnv;
+    cleanEnv.MAX_THINKING_TOKENS = "32000";
   }
+  for (const key of ENV_WHITELIST) {
+    if (process.env[key]) cleanEnv[key] = process.env[key];
+  }
+  const spawnEnv = cleanEnv;
+  const child = spawn(claudePath, cliArgs, { env: spawnEnv });
+
   // #region agent log
+  const _cliSpawnTime = Date.now();
   fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Debug-Session-Id": "eab716",
+      "X-Debug-Session-Id": "abaffc",
     },
     body: JSON.stringify({
-      sessionId: "eab716",
-      location: "proxy-server.js:spawn",
-      message: "CLI spawn params",
+      sessionId: "abaffc",
+      location: "proxy-server.js:cli-spawn",
+      message: "CLI process spawned",
       data: {
         promptTier,
-        maxTurns: cliArgs[cliArgs.indexOf("--max-turns") + 1],
-        selectedModel,
-        lightFastPath: cliArgs.includes("--system-prompt"),
-        disabledSlash: cliArgs.includes("--disable-slash-commands"),
-        effort: cliArgs.includes("--effort")
-          ? cliArgs[cliArgs.indexOf("--effort") + 1]
-          : "none",
-        thinkingTokens: spawnEnv.MAX_THINKING_TOKENS || "default(31999)",
-        timeoutMs:
-          promptTier === "light"
-            ? 45000
-            : promptTier === "standard"
-              ? 120000
-              : 180000,
-        userMsg: lastUserMsg.substring(0, 50),
+        effortLevel,
+        model: selectedModel,
+        isStepExecution,
+        maxThinkingTokens: cleanEnv.MAX_THINKING_TOKENS,
+        disableAdaptiveThinking:
+          cleanEnv.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING || "unset",
+        cliArgsCount: cliArgs.length,
       },
-      timestamp: Date.now(),
+      timestamp: _cliSpawnTime,
+      hypothesisId: "H2,H4",
     }),
   }).catch(() => {});
   // #endregion
-  const child = spawn(claudePath, cliArgs, { env: spawnEnv });
 
-  // CLI 超时保护：light 45s, standard 120s, heavy 180s
+  // CLI 超时保护：light 45s, standard 300s, heavy 600s
+  // 复杂任务（如 DCF 建模）需要多轮代码生成+执行，120s 远不够
   const CLI_TIMEOUT_MS =
     promptTier === "light"
       ? 45_000
       : promptTier === "standard"
-        ? 120_000
-        : 180_000;
+        ? 300_000
+        : 600_000;
   const cliTimer = setTimeout(() => {
     if (!child.killed) {
       console.log(
@@ -2737,6 +3763,10 @@ app.post("/chat", (req, res) => {
         res.write(
           `data: ${JSON.stringify({ type: "result", subtype: "text", text: "\n\n⚠️ 响应超时，请重试或换用更快的模型。" })}\n\n`,
         );
+        res.write(
+          `data: ${JSON.stringify({ type: "done", fullText: "⚠️ 响应超时，请重试或换用更快的模型。", provenance: { mode: currentMode, model: selectedModel, timestamp: Date.now() } })}\n\n`,
+        );
+        res.end();
       }
     }
   }, CLI_TIMEOUT_MS);
@@ -2796,8 +3826,8 @@ app.post("/chat", (req, res) => {
   let _firstTokenTime = 0;
   let _firstThinkTime = 0;
 
-  const CLI_IDLE_TIMEOUT = 120_000;
-  const CLI_TOTAL_TIMEOUT = 600_000; // 10min for complex tasks (DCF, full models)
+  const CLI_IDLE_TIMEOUT = isStepExecution ? 240_000 : 120_000;
+  const CLI_TOTAL_TIMEOUT = 600_000;
   let _lastDataTime = Date.now();
 
   const _idleTimer = setInterval(() => {
@@ -2820,6 +3850,9 @@ app.post("/chat", (req, res) => {
             type: "error",
             message: `${reason}，已自动终止。网络延迟较高，建议：\n1. 切换到 Haiku 模型（更快）\n2. 检查网络连接\n3. 重试`,
           })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({ type: "done", fullText: `⚠️ ${reason}，已自动终止。`, provenance: { mode: currentMode, model: selectedModel, timestamp: Date.now() } })}\n\n`,
         );
         clearInterval(keepalive);
         responseDone = true;
@@ -2854,26 +3887,39 @@ app.post("/chat", (req, res) => {
   }
 
   let _stdoutFirstChunk = true;
+  let _firstStdoutTime = 0;
+  let _firstParsedEvtTime = 0;
+  let _firstThinkEvtTime = 0;
+  let _firstTokenEvtTime = 0;
+  let _parsedEvtTypes = {};
+  // #region agent log
+  let _toolUseCount = 0;
+  let _toolUseLog = [];
+  // #endregion
   child.stdout.on("data", (data) => {
     _lastDataTime = Date.now();
     // #region agent log
-    if (_stdoutFirstChunk) {
-      _stdoutFirstChunk = false;
-      const raw = data.toString().substring(0, 300);
+    if (!_firstStdoutTime) {
+      _firstStdoutTime = Date.now();
       fetch(
         "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Debug-Session-Id": "eab716",
+            "X-Debug-Session-Id": "abaffc",
           },
           body: JSON.stringify({
-            sessionId: "eab716",
-            location: "proxy-server.js:stdout-first",
-            message: "First stdout chunk",
-            data: { elapsedMs: Date.now() - _streamStartTime, rawPreview: raw },
-            timestamp: Date.now(),
+            sessionId: "abaffc",
+            location: "proxy-server.js:cli-first-stdout",
+            message: "First CLI stdout chunk",
+            data: {
+              msSinceSpawn: _firstStdoutTime - _cliSpawnTime,
+              chunkLen: data.length,
+              chunkHead: data.toString().substring(0, 200),
+            },
+            timestamp: _firstStdoutTime,
+            hypothesisId: "H3",
           }),
         },
       ).catch(() => {});
@@ -2889,11 +3935,66 @@ app.post("/chat", (req, res) => {
       try {
         const evt = JSON.parse(line);
 
+        // #region agent log
+        if (!_firstParsedEvtTime) {
+          _firstParsedEvtTime = Date.now();
+          fetch(
+            "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "abaffc",
+              },
+              body: JSON.stringify({
+                sessionId: "abaffc",
+                location: "proxy-server.js:cli-first-parsed",
+                message: "First parsed CLI event",
+                data: {
+                  msSinceSpawn: _firstParsedEvtTime - _cliSpawnTime,
+                  evtType: evt.type,
+                  subType: evt.event?.type || evt.message?.role || "n/a",
+                },
+                timestamp: _firstParsedEvtTime,
+                hypothesisId: "H3,H4",
+              }),
+            },
+          ).catch(() => {});
+        }
+        _parsedEvtTypes[evt.type] = (_parsedEvtTypes[evt.type] || 0) + 1;
+        // #endregion
+
         if (evt.type === "stream_event") {
           const se = evt.event;
           if (se.type === "content_block_delta") {
             if (se.delta?.type === "text_delta" && se.delta.text) {
               if (!_firstTokenTime) _firstTokenTime = Date.now();
+              // #region agent log
+              if (!_firstTokenEvtTime) {
+                _firstTokenEvtTime = Date.now();
+                fetch(
+                  "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-Debug-Session-Id": "abaffc",
+                    },
+                    body: JSON.stringify({
+                      sessionId: "abaffc",
+                      location: "proxy-server.js:cli-first-token",
+                      message: "First text_delta from CLI",
+                      data: {
+                        msSinceSpawn: _firstTokenEvtTime - _cliSpawnTime,
+                        textLen: se.delta.text.length,
+                      },
+                      timestamp: _firstTokenEvtTime,
+                      hypothesisId: "H2",
+                    }),
+                  },
+                ).catch(() => {});
+              }
+              // #endregion
               resultText += se.delta.text;
               _tokenCount++;
               res.write(
@@ -2904,6 +4005,33 @@ app.post("/chat", (req, res) => {
               se.delta.thinking
             ) {
               if (!_firstThinkTime) _firstThinkTime = Date.now();
+              // #region agent log
+              if (!_firstThinkEvtTime) {
+                _firstThinkEvtTime = Date.now();
+                fetch(
+                  "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-Debug-Session-Id": "abaffc",
+                    },
+                    body: JSON.stringify({
+                      sessionId: "abaffc",
+                      location: "proxy-server.js:cli-first-thinking-delta",
+                      message: "First thinking_delta from CLI (stream_event)",
+                      data: {
+                        msSinceSpawn: _firstThinkEvtTime - _cliSpawnTime,
+                        thinkingLen: se.delta.thinking.length,
+                        thinkingHead: se.delta.thinking.substring(0, 60),
+                      },
+                      timestamp: _firstThinkEvtTime,
+                      hypothesisId: "H1,H4",
+                    }),
+                  },
+                ).catch(() => {});
+              }
+              // #endregion
               _thinkingText += se.delta.thinking;
               res.write(
                 `data: ${JSON.stringify({ type: "thinking", text: se.delta.thinking })}\n\n`,
@@ -2915,12 +4043,108 @@ app.post("/chat", (req, res) => {
             se.content_block?.type === "tool_use" &&
             !res.writableEnded
           ) {
+            // #region agent log
+            _toolUseCount++;
+            const _tuTime = Date.now();
+            _toolUseLog.push({
+              name: se.content_block.name,
+              ms: _tuTime - _cliSpawnTime,
+            });
+            fetch(
+              "http://127.0.0.1:7244/ingest/654d9aa3-fbba-48f2-b4ce-e7b9fc0ed511",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "abaffc",
+                },
+                body: JSON.stringify({
+                  sessionId: "abaffc",
+                  location: "proxy-server.js:cli-tool-use",
+                  message: `CLI tool_use #${_toolUseCount}: ${se.content_block.name}`,
+                  data: {
+                    toolName: se.content_block.name,
+                    toolUseIndex: _toolUseCount,
+                    msSinceSpawn: _tuTime - _cliSpawnTime,
+                    promptTier,
+                  },
+                  timestamp: _tuTime,
+                  hypothesisId: "H2,H3",
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
             res.write(
               `data: ${JSON.stringify({ type: "activity", action: "tool_use", name: se.content_block.name })}\n\n`,
             );
           }
         } else if (evt.type === "assistant" && evt.message?.content) {
           if (!_firstTokenTime) _firstTokenTime = Date.now();
+          // #region agent log
+          const blockTypes = evt.message.content.map((b) => b.type);
+          const textBlocks = evt.message.content.filter(
+            (b) => b.type === "text",
+          );
+          const thinkBlocks = evt.message.content.filter(
+            (b) => b.type === "thinking",
+          );
+          fetch(
+            "http://127.0.0.1:7244/ingest/654d9aa3-fbba-48f2-b4ce-e7b9fc0ed511",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "abaffc",
+              },
+              body: JSON.stringify({
+                sessionId: "abaffc",
+                location: "proxy-server.js:cli-assistant-msg",
+                message: "CLI assistant message arrived (batch)",
+                data: {
+                  msSinceSpawn: Date.now() - _cliSpawnTime,
+                  blockTypes,
+                  thinkingLen: thinkBlocks[0]?.thinking?.length || 0,
+                  textLen: textBlocks.reduce(
+                    (s, b) => s + (b.text?.length || 0),
+                    0,
+                  ),
+                  toolUseSoFar: _toolUseCount,
+                },
+                timestamp: Date.now(),
+                hypothesisId: "H2,H5",
+              }),
+            },
+          ).catch(() => {});
+          if (thinkBlocks.length > 0 && !_firstThinkEvtTime) {
+            _firstThinkEvtTime = Date.now();
+            fetch(
+              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "abaffc",
+                },
+                body: JSON.stringify({
+                  sessionId: "abaffc",
+                  location: "proxy-server.js:cli-assistant-thinking",
+                  message: "Thinking from assistant msg (NOT streaming)",
+                  data: {
+                    msSinceSpawn: _firstThinkEvtTime - _cliSpawnTime,
+                    blockTypes,
+                    thinkingLen: thinkBlocks[0].thinking?.length || 0,
+                    thinkingHead: (thinkBlocks[0].thinking || "").substring(
+                      0,
+                      60,
+                    ),
+                  },
+                  timestamp: _firstThinkEvtTime,
+                  hypothesisId: "H4",
+                }),
+              },
+            ).catch(() => {});
+          }
+          // #endregion
           for (const block of evt.message.content) {
             if (block.type === "thinking" && block.thinking) {
               _thinkingText += block.thinking;
@@ -2928,6 +4152,21 @@ app.post("/chat", (req, res) => {
             } else if (block.type === "text" && block.text) {
               resultText += block.text;
               _enqueueText(block.text, "token");
+            } else if (
+              block.type === "tool_use" &&
+              block.name &&
+              !res.writableEnded
+            ) {
+              // CLI delivers tool_use as assistant-message blocks (not stream_event)
+              // Emit activity so the frontend shows progress instead of blank "Thinking..."
+              _toolUseCount++;
+              _toolUseLog.push({
+                name: block.name,
+                ms: Date.now() - _cliSpawnTime,
+              });
+              res.write(
+                `data: ${JSON.stringify({ type: "activity", action: "tool_use", name: block.name })}\n\n`,
+              );
             }
           }
         } else if (evt.type === "result") {
@@ -2948,31 +4187,12 @@ app.post("/chat", (req, res) => {
     const chunk = data.toString().trim();
     _stderrBuf += chunk + "\n";
     console.error("[proxy] stderr:", chunk);
-    // #region agent log
-    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "eab716",
-      },
-      body: JSON.stringify({
-        sessionId: "eab716",
-        location: "proxy-server.js:stderr",
-        message: "CLI stderr output",
-        data: { stderr: chunk.substring(0, 500) },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   });
 
   child.on("close", (code, signal) => {
     clearTimeout(cliTimer);
     clearInterval(_idleTimer);
     // #region agent log
-    const _totalMs = Date.now() - _streamStartTime;
-    const _ttft = _firstTokenTime ? _firstTokenTime - _streamStartTime : -1;
-    const _tttt = _firstThinkTime ? _firstThinkTime - _streamStartTime : -1;
     fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
       method: "POST",
       headers: {
@@ -2981,22 +4201,96 @@ app.post("/chat", (req, res) => {
       },
       body: JSON.stringify({
         sessionId: "eab716",
-        location: "proxy-server.js:close",
-        message: "CLI completed",
+        location: "proxy-server.js:cli-close",
+        message: "CLI process closed",
         data: {
           code,
           signal,
-          totalMs: _totalMs,
-          ttFirstToken: _ttft,
-          ttFirstThink: _tttt,
-          thinkingChars: _thinkingText.length,
-          resultChars: resultText.length,
-          promptTier,
-          selectedModel,
-          maxTurns,
-          thinkingTokenEnv: spawnEnv.MAX_THINKING_TOKENS || "default",
+          resultTextLen: resultText?.length || 0,
+          stderrLen: _stderrBuf?.length || 0,
+          stderrHead: (_stderrBuf || "").substring(0, 300),
+          resultHead: (resultText || "").substring(0, 200),
+          responseDone,
         },
         timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    console.log(
+      `[cli-close] code=${code} signal=${signal} resultLen=${resultText?.length || 0} stderrLen=${_stderrBuf?.length || 0} stderr="${(_stderrBuf || "").substring(0, 150)}"`,
+    );
+    // #endregion
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "abaffc",
+      },
+      body: JSON.stringify({
+        sessionId: "abaffc",
+        location: "proxy-server.js:cli-timeline-summary",
+        message: "CLI thinking timeline summary",
+        data: {
+          totalMs: Date.now() - _cliSpawnTime,
+          firstStdoutMs: _firstStdoutTime
+            ? _firstStdoutTime - _cliSpawnTime
+            : -1,
+          firstParsedEvtMs: _firstParsedEvtTime
+            ? _firstParsedEvtTime - _cliSpawnTime
+            : -1,
+          firstThinkingMs: _firstThinkEvtTime
+            ? _firstThinkEvtTime - _cliSpawnTime
+            : -1,
+          firstTokenMs: _firstTokenEvtTime
+            ? _firstTokenEvtTime - _cliSpawnTime
+            : -1,
+          thinkingChars: _thinkingText.length,
+          resultChars: resultText.length,
+          parsedEvtTypes: _parsedEvtTypes,
+          toolUseCount: _toolUseCount,
+          toolUseLog: _toolUseLog,
+          isStepExecution,
+          promptTier,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H1,H2,H3,H4",
+      }),
+    }).catch(() => {});
+    // #endregion
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/654d9aa3-fbba-48f2-b4ce-e7b9fc0ed511", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "abaffc",
+      },
+      body: JSON.stringify({
+        sessionId: "abaffc",
+        location: "proxy-server.js:cli-close-summary",
+        message: "CLI total time breakdown",
+        data: {
+          totalMs: Date.now() - _cliSpawnTime,
+          startupMs: _firstStdoutTime ? _firstStdoutTime - _cliSpawnTime : -1,
+          firstThinkingMs: _firstThinkEvtTime
+            ? _firstThinkEvtTime - _cliSpawnTime
+            : -1,
+          firstTokenMs: _firstTokenEvtTime
+            ? _firstTokenEvtTime - _cliSpawnTime
+            : -1,
+          thinkingChars: _thinkingText.length,
+          resultChars: resultText.length,
+          toolUseCount: _toolUseCount,
+          toolUseLog: _toolUseLog,
+          promptTier,
+          model: selectedModel,
+          effortLevel,
+          maxTurns,
+          webSearch: !!webSearch,
+          code,
+          signal,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H1,H2,H3,H4,H5",
       }),
     }).catch(() => {});
     // #endregion
@@ -3290,6 +4584,8 @@ async function initV220Modules() {
     _triggerEngine = te;
 
     console.log("   [v2.2.0] Heartbeat + Trigger Engine 已启动");
+
+    if (USE_DIRECT_API) directApi.warmup();
   } catch (err) {
     console.warn(`   [v2.2.0] 模块初始化警告: ${err.message}`);
   }
@@ -3725,4 +5021,13 @@ app.listen(PORT, "127.0.0.1", () => {
 
   // 异步初始化 v2.2.0 模块（不阻塞启动）
   initV220Modules();
+});
+
+// 防止未捕获异常/未处理 Promise 拒绝导致进程崩溃
+process.on("uncaughtException", (err) => {
+  console.error(`[crash-guard] uncaughtException: ${err.message}`);
+  console.error(err.stack);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error(`[crash-guard] unhandledRejection:`, reason);
 });

@@ -65,14 +65,45 @@ ws.Activate(); // 必须激活新工作表
 - ⚠️ 新建工作表后必须调用 ws.Activate() 让用户能看到结果
 - 仅当用户明确说"修改/替换/清除现有数据"时，才在 ActiveSheet 上操作
 
+### WPS JSAPI 兼容性（VS Excel VBA / Office.js 关键差异）
+
+⚠️ **这是 WPS Office JS 宏环境，不是 Excel VBA 也不是 Office.js！** 以下差异必须严格遵守：
+
+| VBA / Office.js 写法（❌ 错误） | WPS JSAPI 写法（✅ 正确） |
+|---|---|
+| `ws.Cells(row, col)` | `ws.Cells.Item(row, col)` 或 `ws.Range(CL(col)+row)` |
+| `ws.Rows(5)` | `ws.Range("5:5")` |
+| `ws.Columns("D")` | `ws.Range("D:D")` |
+| `ws.Columns("D:F")` | `ws.Range("D:F")` |
+| `Worksheets(1)` | `Worksheets.Item(1)` |
+| `wb.Sheets("名称")` | `wb.Sheets.Item("名称")` |
+| `chart.SeriesCollection(1)` | `chart.SeriesCollection.Item(1)` |
+| `Range("A1").Value` | `Range("A1").Value2`（写入）/ `Range("A1").Value()`（读取） |
+| `ActiveSheet`（无前缀） | `Application.ActiveSheet` |
+| `ActiveWorkbook`（无前缀） | `Application.ActiveWorkbook` |
+| `[A1] = 5` | `Range("A1").Value2 = 5` |
+| `.Select` / `.Activate`（无括号） | `.Select()` / `.Activate()`（必须加括号） |
+| `AddChart2(-1, type, ...)` | `AddChart2(0, type, ...)`（Style -1 返回 null） |
+| `chartWs.Cells.Clear()` | `chartWs.UsedRange.Clear()` |
+
+**核心原则**：
+1. 集合访问必须用 `.Item()`：`Sheets.Item(1)`、`SeriesCollection.Item(1)`
+2. 方法调用必须加括号：`.Select()`、`.Activate()`、`.Clear()`
+3. JS 大小写敏感：`Value2` 不是 `value2`
+4. 读值用 `Value()` 方法或 `Value2` 属性；写值用 `Value2` 属性
+5. 不支持 `[A1]` 方括号单元格引用（JS 会解析为解构赋值）
+
 ### 严禁
 
 - ❌ 只生成表头不写数据
-- ❌ 使用 ws.Cells()、ws.Rows()、ws.Columns()
+- ❌ 使用 ws.Cells()、ws.Rows()、ws.Columns()（用 ws.Range() / ws.Cells.Item()）
 - ❌ 使用 ws.ChartObjects.Add()（必须用 Shapes.AddChart2）
 - ❌ 使用 .Borders、.BorderAround()（WPS 不支持，会崩溃）
 - ❌ 用文字描述功能代替实际代码
 - ❌ 把代码拆成多个代码块
 - ❌ 生成超过 300 行的代码
+- ❌ 使用 Excel VBA 语法（Dim、Set、Sub/End Sub）
+- ❌ 集合直接括号访问（用 .Item()）
+- ❌ AddChart2 的 Style 参数用 -1 或 ChartType 用 65
 
 ✅ 图表：用户要求图表时，必须使用 ws.Shapes.AddChart2() 并包裹 try/catch 降级为趋势符号

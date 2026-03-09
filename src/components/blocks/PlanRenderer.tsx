@@ -12,23 +12,255 @@ interface Props {
   readonly?: boolean;
 }
 
-function stepStatusClass(status: PlanStepStatus | undefined): string {
-  switch (status) {
-    case "running": return blockStyles.stepRunning;
-    case "success": return blockStyles.stepSuccess;
-    case "failed": return blockStyles.stepFailed;
-    case "skipped": return blockStyles.stepSkipped;
-    default: return blockStyles.stepPending;
-  }
+const ICON_SIZE = 16;
+const STROKE = "currentColor";
+
+function IconCircle({ index }: { index: number }) {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" fill="none">
+      <circle
+        cx="8"
+        cy="8"
+        r="6.5"
+        stroke="var(--text-faint)"
+        strokeWidth="1.2"
+      />
+      <text
+        x="8"
+        y="11"
+        textAnchor="middle"
+        fill="var(--text-faint)"
+        fontSize="8"
+        fontFamily="inherit"
+      >
+        {index}
+      </text>
+    </svg>
+  );
 }
 
-function stepStatusIcon(status: PlanStepStatus | undefined, index: number): string {
+function IconRunning() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" fill="none">
+      <circle
+        cx="8"
+        cy="8"
+        r="6.5"
+        stroke="var(--brand-primary)"
+        strokeWidth="1.2"
+        strokeDasharray="4 2"
+      >
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 8 8"
+          to="360 8 8"
+          dur="1.2s"
+          repeatCount="indefinite"
+        />
+      </circle>
+      <circle cx="8" cy="8" r="2" fill="var(--brand-primary)" />
+    </svg>
+  );
+}
+
+function IconSuccess() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" fill="none">
+      <circle
+        cx="8"
+        cy="8"
+        r="6.5"
+        stroke="var(--success-color, #4ade80)"
+        strokeWidth="1.2"
+        fill="var(--success-color, #4ade80)"
+        fillOpacity="0.15"
+      />
+      <path
+        d="M5 8.5L7 10.5L11 6"
+        stroke="var(--success-color, #4ade80)"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconFailed() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" fill="none">
+      <circle
+        cx="8"
+        cy="8"
+        r="6.5"
+        stroke="var(--error-color, #f87171)"
+        strokeWidth="1.2"
+      />
+      <path
+        d="M6 6L10 10M10 6L6 10"
+        stroke="var(--error-color, #f87171)"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconSkipped() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" fill="none">
+      <circle
+        cx="8"
+        cy="8"
+        r="6.5"
+        stroke="var(--text-faint)"
+        strokeWidth="1.2"
+        strokeDasharray="2 2"
+      />
+      <path
+        d="M5 8H11"
+        stroke="var(--text-faint)"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconPlay() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path
+        d="M3 2L10 6L3 10V2Z"
+        stroke={STROKE}
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconSkip() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path
+        d="M2 6H10"
+        stroke={STROKE}
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconEdit() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path
+        d="M7.5 2.5L9.5 4.5M2 10L2.5 7.5L9 1L11 3L4.5 9.5L2 10Z"
+        stroke={STROKE}
+        strokeWidth="1"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconDelete() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path
+        d="M3 3L9 9M9 3L3 9"
+        stroke={STROKE}
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path
+        d="M2 6.5L5 9.5L10 3"
+        stroke={STROKE}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconClipboard() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <rect
+        x="3"
+        y="2.5"
+        width="10"
+        height="12"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path
+        d="M6 2.5V1.5A.5.5 0 016.5 1h3a.5.5 0 01.5.5v1"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <line
+        x1="5.5"
+        y1="6"
+        x2="10.5"
+        y2="6"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+      />
+      <line
+        x1="5.5"
+        y1="8.5"
+        x2="10.5"
+        y2="8.5"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+      />
+      <line
+        x1="5.5"
+        y1="11"
+        x2="8.5"
+        y2="11"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function StepStatusIcon({
+  status,
+  index,
+}: {
+  status: PlanStepStatus;
+  index: number;
+}) {
   switch (status) {
-    case "running": return "◎";
-    case "success": return "✓";
-    case "failed": return "✗";
-    case "skipped": return "–";
-    default: return String(index);
+    case "running":
+      return <IconRunning />;
+    case "success":
+      return <IconSuccess />;
+    case "failed":
+      return <IconFailed />;
+    case "skipped":
+      return <IconSkipped />;
+    default:
+      return <IconCircle index={index} />;
   }
 }
 
@@ -126,8 +358,9 @@ function PlanRenderer({
           <button
             className={`${blockStyles.actionBtn} ${blockStyles.actionBtnPrimary}`}
             onClick={() => onConfirmPlan(steps)}
+            disabled={isAnyRunning}
           >
-            ▶ 全部执行
+            <IconPlay /> 全部执行
           </button>
         </div>
       )}
@@ -140,12 +373,16 @@ function PlanRenderer({
       status={blockStatus}
       title="执行计划"
       badge={`${doneCount}/${totalCount}`}
+      iconNode={<IconClipboard />}
       footer={footer}
     >
       <div style={{ padding: "4px 0" }}>
         {steps.map((step) => {
           const effectiveStatus: PlanStepStatus =
             step.status ?? (step.done ? "success" : "pending");
+          const isDone = effectiveStatus === "success";
+          const isSkippedOrFailed =
+            effectiveStatus === "skipped" || effectiveStatus === "failed";
 
           return (
             <div
@@ -156,14 +393,37 @@ function PlanRenderer({
                 gap: 8,
                 padding: "4px 14px",
                 minHeight: 28,
+                opacity: isSkippedOrFailed ? 0.5 : 1,
               }}
             >
               <button
-                className={`${blockStyles.stepDot} ${stepStatusClass(effectiveStatus)}`}
+                className={`${blockStyles.stepDot} ${
+                  effectiveStatus === "running"
+                    ? blockStyles.stepRunning
+                    : effectiveStatus === "success"
+                      ? blockStyles.stepSuccess
+                      : effectiveStatus === "failed"
+                        ? blockStyles.stepFailed
+                        : effectiveStatus === "skipped"
+                          ? blockStyles.stepSkipped
+                          : blockStyles.stepPending
+                }`}
                 onClick={() => handleToggleDone(step.index)}
                 disabled={readonly}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "none",
+                  border: "none",
+                  cursor: readonly ? "default" : "pointer",
+                  padding: 0,
+                  width: 18,
+                  height: 18,
+                  flexShrink: 0,
+                }}
               >
-                {stepStatusIcon(effectiveStatus, step.index)}
+                <StepStatusIcon status={effectiveStatus} index={step.index} />
               </button>
 
               {editingIdx === step.index ? (
@@ -187,20 +447,33 @@ function PlanRenderer({
                       fontFamily: "inherit",
                     }}
                   />
-                  <button className={blockStyles.iconBtn} onClick={handleSaveEdit}>✓</button>
-                  <button className={blockStyles.iconBtn} onClick={() => setEditingIdx(null)}>✕</button>
+                  <button
+                    className={blockStyles.iconBtn}
+                    onClick={handleSaveEdit}
+                  >
+                    <IconCheck />
+                  </button>
+                  <button
+                    className={blockStyles.iconBtn}
+                    onClick={() => setEditingIdx(null)}
+                  >
+                    <IconDelete />
+                  </button>
                 </div>
               ) : (
                 <span
                   style={{
                     flex: 1,
                     fontSize: 12,
-                    color:
-                      effectiveStatus === "skipped"
+                    color: isDone
+                      ? "var(--text-faint)"
+                      : isSkippedOrFailed
                         ? "var(--text-faint)"
                         : "var(--text-secondary)",
                     textDecoration:
-                      effectiveStatus === "skipped" ? "line-through" : "none",
+                      isDone || effectiveStatus === "skipped"
+                        ? "line-through"
+                        : "none",
                     cursor: readonly ? "default" : "text",
                   }}
                   onDoubleClick={() => handleStartEdit(step.index, step.text)}
@@ -210,14 +483,28 @@ function PlanRenderer({
               )}
 
               {!readonly && editingIdx !== step.index && (
-                <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 2,
+                    flexShrink: 0,
+                    alignItems: "center",
+                  }}
+                >
                   {onExecuteStep && effectiveStatus === "pending" && (
                     <button
                       className={blockStyles.actionBtn}
                       onClick={() => onExecuteStep(step.index)}
-                      style={{ fontSize: 9, padding: "1px 6px" }}
+                      style={{
+                        fontSize: 9,
+                        padding: "2px 6px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 2,
+                      }}
+                      title="执行此步骤"
                     >
-                      ▶
+                      <IconPlay />
                     </button>
                   )}
                   {onSkipStep && effectiveStatus === "pending" && (
@@ -226,23 +513,27 @@ function PlanRenderer({
                       onClick={() => onSkipStep(step.index)}
                       title="跳过"
                     >
-                      –
+                      <IconSkip />
                     </button>
                   )}
-                  <button
-                    className={blockStyles.iconBtn}
-                    onClick={() => handleStartEdit(step.index, step.text)}
-                    title="编辑"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    className={blockStyles.iconBtn}
-                    onClick={() => handleDelete(step.index)}
-                    title="删除"
-                  >
-                    ✕
-                  </button>
+                  {effectiveStatus === "pending" && (
+                    <button
+                      className={blockStyles.iconBtn}
+                      onClick={() => handleStartEdit(step.index, step.text)}
+                      title="编辑"
+                    >
+                      <IconEdit />
+                    </button>
+                  )}
+                  {effectiveStatus === "pending" && (
+                    <button
+                      className={blockStyles.iconBtn}
+                      onClick={() => handleDelete(step.index)}
+                      title="删除"
+                    >
+                      <IconDelete />
+                    </button>
+                  )}
                 </div>
               )}
             </div>

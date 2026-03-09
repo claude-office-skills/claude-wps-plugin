@@ -81,6 +81,22 @@ export async function executeCode(
   const submitData = await submitRes.json();
 
   if (submitData.blocked) {
+    // #region agent log
+    fetch("http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "f532b6",
+      },
+      body: JSON.stringify({
+        sessionId: "f532b6",
+        location: "wpsAdapter.ts:blocked",
+        message: "BlockedError about to throw",
+        data: { force, reason: submitData.reason, blocked: submitData.blocked },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     throw new BlockedError(submitData.reason || "操作被安全策略拦截");
   }
 

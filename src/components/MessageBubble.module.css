@@ -3,7 +3,7 @@
 .msgRow {
   display: flex;
   flex-direction: column;
-  padding: 6px 0 4px;
+  padding: 14px 0 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   min-width: 0;
 }
@@ -19,26 +19,28 @@
 /* 最新用户提问框吸顶 sticky（Cursor 风格） */
 .stickyUserRow {
   position: sticky;
-  top: -8px;
+  top: 0;
   z-index: 10;
   background: var(--bg-base);
-  padding-top: 8px;
-  padding-bottom: 6px;
+  padding-top: 6px;
+  padding-bottom: 4px;
   margin-left: -14px;
   margin-right: -14px;
   padding-left: 14px;
   padding-right: 14px;
 }
 
+/* 底部渐变阴影，区分吸顶消息和正文内容 */
 .stickyUserRow::after {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -12px;
-  height: 12px;
+  bottom: -10px;
+  height: 10px;
   background: linear-gradient(to bottom, var(--bg-base), transparent);
   pointer-events: none;
+  z-index: 1;
 }
 
 /* 用户消息编辑态 */
@@ -169,8 +171,16 @@
   line-height: 1.65;
   word-break: break-word;
   min-width: 0;
+  overflow-wrap: break-word;
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* 流式中：限制未完成代码块的最大高度，防止原始文本撑开气泡 */
+.assistContentStreaming {
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ── 底部操作栏（复制、点赞、点踩）── */

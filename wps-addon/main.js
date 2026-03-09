@@ -109,11 +109,20 @@ function GetImage(control) {
   try {
     controlId = control.Id || control.id || "";
   } catch (e) {}
-  var iconPath = "images/claude-icon.png";
+
+  var basePath = "";
+  try {
+    if (typeof __dirname !== "undefined") {
+      basePath = __dirname + "/";
+    } else if (typeof wps !== "undefined" && wps.Env && wps.Env.GetPluginPath) {
+      basePath = wps.Env.GetPluginPath() + "/";
+    }
+  } catch (e) {}
+
   if (controlId === "OpenDebugger") {
-    iconPath = "images/debug-icon.png";
+    return basePath + "images/debug-icon.png";
   }
-  return iconPath;
+  return basePath + "images/claude-icon.png";
 }
 
 // ── 右键 "Add to Chat" ─────────────────────────────────────
@@ -351,7 +360,8 @@ function collectWpsContext() {
         var urSampleValues = [];
         try {
           var urTopLeft = CL(ur.Column) + ur.Row;
-          var urBotRight = CL(ur.Column + urSampleCols - 1) + (ur.Row + urSampleRows - 1);
+          var urBotRight =
+            CL(ur.Column + urSampleCols - 1) + (ur.Row + urSampleRows - 1);
           var urVals = ws2.Range(urTopLeft + ":" + urBotRight).Value2;
           if (urVals) {
             if (urSampleRows === 1 && urSampleCols === 1) {
@@ -368,13 +378,17 @@ function collectWpsContext() {
                     urOutRow.push(uv === undefined || uv === null ? "" : uv);
                   }
                 } else {
-                  urOutRow.push(urRow === undefined || urRow === null ? "" : urRow);
+                  urOutRow.push(
+                    urRow === undefined || urRow === null ? "" : urRow,
+                  );
                 }
                 urSampleValues.push(urOutRow);
               }
             }
           }
-        } catch (e) { urSampleValues = []; }
+        } catch (e) {
+          urSampleValues = [];
+        }
         result.usedRange = {
           address: String(urAddr).replace(/\$/g, ""),
           rowCount: urRowCount,
@@ -643,7 +657,7 @@ var actionRegistry = {
       col = r.Column;
     for (var i = 0; i < count; i++) {
       var target =
-        direction === "down" ? ws.Cells(row + i, col) : ws.Cells(row, col + i);
+        direction === "down" ? ws.Cells.Item(row + i, col) : ws.Cells.Item(row, col + i);
       target.Formula = formula;
     }
     return "已批量填充 " + count + " 个单元格";
@@ -652,7 +666,7 @@ var actionRegistry = {
     var ws = Application.ActiveSheet;
     var rng = ws.Range(range);
     var order = ascending !== false ? 1 : 2;
-    rng.Sort(rng.Columns(colIndex || 1), order);
+    rng.Sort(rng.Columns.Item(colIndex || 1), order);
     return "已排序 " + range;
   },
   autoFilter: function (range) {
@@ -662,7 +676,7 @@ var actionRegistry = {
   },
   freezePane: function (row, col) {
     var ws = Application.ActiveSheet;
-    ws.Cells(row || 2, col || 1).Select();
+    ws.Cells.Item(row || 2, col || 1).Select();
     Application.ActiveWindow.FreezePanes = true;
     return "已冻结窗格";
   },

@@ -30,7 +30,9 @@ import {
   executeShell,
   previewHtml,
   pollAddToChat,
+  BlockedError,
 } from "./api/wpsAdapter";
+import { friendlyErrorMessage } from "./utils/errorMessages";
 import {
   saveSession,
   loadSession,
@@ -100,7 +102,8 @@ export default function App() {
   const [teamTask, setTeamTask] = useState<{
     id: string;
     goal: string;
-    status: "running" | "done" | "failed";
+    status: "planning" | "running" | "done" | "failed";
+    error?: string;
     subtasks: Array<{
       id: string;
       agent: string;
@@ -206,6 +209,7 @@ export default function App() {
   const lastSentInputRef = useRef<string>("");
   const autoContinueRoundRef = useRef(0);
   const maxAutoContinueRef = useRef(3);
+  const autoRetryCountRef = useRef(0);
   const MAX_AUTO_CONTINUE_HARD_CAP = 8;
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -322,10 +326,18 @@ export default function App() {
     };
   }, []);
 
-  // 启动时恢复最近会话
+  // 启动时恢复会话：优先使用 localStorage（已由 useAgentManager 自动加载）
+  // 只有 localStorage 无数据时才从服务器拉取最新会话（兜底）
   useEffect(() => {
     const restoreLastSession = async () => {
       try {
+        // 若 localStorage 已有有效 agent 数据则跳过，避免覆盖多 agent 状态
+        const hasLocalData = agents.some(
+          (a) =>
+            a.messages.filter((m) => !m.id.startsWith("welcome")).length > 0,
+        );
+        if (hasLocalData) return;
+
         const sessions = await listSessions();
         if (sessions.length === 0) return;
         const latest = sessions[0];
@@ -416,7 +428,9 @@ export default function App() {
   const prevMsgCountRef = useRef(0);
   useEffect(() => {
     const isStreaming = messages.some((m) => m.isStreaming);
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user" && !m.isAutoContinue);
+    const lastUserMsg = [...messages]
+      .reverse()
+      .find((m) => m.role === "user" && !m.isAutoContinue);
     const msgCountGrew = messages.length > prevMsgCountRef.current;
     prevMsgCountRef.current = messages.length;
 
@@ -439,19 +453,31 @@ export default function App() {
       error?: string,
       diff?: import("./types").DiffResult | null,
     ) => {
+      const MANUAL_LANGS = [
+        "python",
+        "py",
+        "bash",
+        "shell",
+        "sh",
+        "zsh",
+        "terminal",
+      ];
+      const msg = messagesRef.current.find((m) => m.id === msgId);
+      const block = msg?.codeBlocks?.find((b) => b.id === blockId);
+      const lang = (block?.language || "").toLowerCase();
+      const isManualLang = MANUAL_LANGS.includes(lang);
+
       updateActiveMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id !== msgId) return msg;
-          const updatedBlocks = msg.codeBlocks?.map((b) =>
+        prev.map((m) => {
+          if (m.id !== msgId) return m;
+          const updatedBlocks = m.codeBlocks?.map((b) =>
             b.id === blockId
               ? { ...b, executed: true, result, error, diff }
               : b,
           );
-          // Inject local.* action as an activity so it appears in sidebar
-          const block = msg.codeBlocks?.find((b) => b.id === blockId);
           const isLocalJson =
             block?.language?.toLowerCase() === "json" &&
-            block.code?.trim().startsWith('{"_action"');
+            block?.code?.trim().startsWith('{"_action"');
           let extraActivity: ActivityEvent | null = null;
           if (isLocalJson && !error) {
             try {
@@ -464,16 +490,113 @@ export default function App() {
             } catch {}
           }
           return {
-            ...msg,
+            ...m,
             codeBlocks: updatedBlocks,
             activities: extraActivity
-              ? [...(msg.activities ?? []), extraActivity]
-              : msg.activities,
+              ? [...(m.activities ?? []), extraActivity]
+              : m.activities,
           };
         }),
       );
+
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "App.tsx:handleCodeExecuted",
+            message: "code executed callback",
+            data: {
+              msgId,
+              blockId,
+              lang,
+              isManualLang,
+              hasError: !!error,
+              hasResult: !!result,
+              resultLen: result?.length,
+              currentMode,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+
+      if (!error && result && isManualLang && currentMode === "agent") {
+        // #region agent log
+        fetch(
+          "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "eab716",
+            },
+            body: JSON.stringify({
+              sessionId: "eab716",
+              location: "App.tsx:handleCodeExecuted:autoContinue",
+              message: "triggering auto-continue for manual lang",
+              data: { lang, currentMode, resultPreview: result?.slice(0, 200) },
+              timestamp: Date.now(),
+            }),
+          },
+        ).catch(() => {});
+        // #endregion
+        setTimeout(async () => {
+          const originalUserMsg =
+            messagesRef.current.find(
+              (m) => m.role === "user" && !m.isAutoContinue,
+            )?.content || "";
+          let sheetList = "";
+          try {
+            const freshCtx = await getWpsContext();
+            if (freshCtx?.sheetNames?.length) {
+              sheetList = freshCtx.sheetNames.join(", ");
+            }
+          } catch {}
+          const displayText = `[${lang} 执行结果]\n${result.slice(0, 300)}${result.length > 300 ? "..." : ""}`;
+          const promptText =
+            `[${lang} 执行结果]\n${result}\n\n` +
+            `原始任务: ${originalUserMsg}\n` +
+            (sheetList ? `当前工作簿的 Sheet: ${sheetList}\n` : "") +
+            `上一步代码已成功执行，获取到了数据。请将数据写入 Excel 表格：\n` +
+            `- 生成 javascript 代码（WPS ET API），把数据填充到工作表\n` +
+            `- 包含表头和格式化（列宽、对齐等）\n` +
+            `- 使用 Application.ActiveWorkbook 和合适的 Sheet\n` +
+            `- 如果数据量大，分批写入避免超时`;
+          // #region agent log
+          fetch(
+            "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "eab716",
+              },
+              body: JSON.stringify({
+                sessionId: "eab716",
+                location: "App.tsx:handleCodeExecuted:sendingPrompt",
+                message: "sending auto-continue prompt",
+                data: {
+                  promptLen: promptText.length,
+                  displayText: displayText.slice(0, 100),
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+          // #endregion
+          handleSendRef.current(promptText, true, displayText);
+        }, 100);
+      }
     },
-    [updateActiveMessages],
+    [updateActiveMessages, currentMode],
   );
 
   const messagesRef = useRef(messages);
@@ -488,13 +611,15 @@ export default function App() {
       setApplyingMsgId(msgId);
 
       for (const block of blocks) {
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'eab716'},body:JSON.stringify({sessionId:'eab716',location:'App.tsx:handleApplyCode',message:'block exec with lang routing',data:{blockId:block.id,language:block.language,codeStart:block.code.slice(0,80)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
         try {
           const lang = (block.language || "javascript").toLowerCase();
-          const isShell = ["bash","shell","sh","zsh","terminal"].includes(lang);
-          let execResult: { result: string; diff?: import("./types").DiffResult | null };
+          const isShell = ["bash", "shell", "sh", "zsh", "terminal"].includes(
+            lang,
+          );
+          let execResult: {
+            result: string;
+            diff?: import("./types").DiffResult | null;
+          };
           if (lang === "python" || lang === "py") {
             execResult = await executePython(block.code);
           } else if (isShell) {
@@ -536,8 +661,20 @@ export default function App() {
     [updateActiveMessages],
   );
 
-  const handleSendRef = useRef<(text?: string) => Promise<void>>(
-    null as unknown as (text?: string) => Promise<void>,
+  const handleSendRef = useRef<
+    (
+      text?: string,
+      autoContinue?: boolean,
+      displayOverride?: string,
+      isStepExecution?: boolean,
+    ) => Promise<void>
+  >(
+    null as unknown as (
+      text?: string,
+      autoContinue?: boolean,
+      displayOverride?: string,
+      isStepExecution?: boolean,
+    ) => Promise<void>,
   );
 
   const loadingRef = useRef(loading);
@@ -697,6 +834,46 @@ ${code}
     setAttachedFiles([]);
   }, [createNewAgent, pruneIdleAgents]);
 
+  const handleSwitchAgent = useCallback(
+    (targetId: string) => {
+      // #region agent log
+      const streamingAgent = agents.find((a) =>
+        a.messages.some((m) => m.isStreaming),
+      );
+      if (streamingAgent) {
+        const streamingMsg = streamingAgent.messages.find((m) => m.isStreaming);
+        fetch(
+          "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "f532b6",
+            },
+            body: JSON.stringify({
+              sessionId: "f532b6",
+              location: "App.tsx:handleSwitchAgent",
+              message: "switching during stream",
+              hypothesisId: "B",
+              data: {
+                fromAgentId: activeAgentId,
+                toAgentId: targetId,
+                streamingAgentId: streamingAgent.id,
+                hasThinkingContent: !!streamingMsg?.thinkingContent,
+                thinkingLen: streamingMsg?.thinkingContent?.length ?? 0,
+                isStreaming: streamingMsg?.isStreaming,
+              },
+              timestamp: Date.now(),
+            }),
+          },
+        ).catch(() => {});
+      }
+      // #endregion
+      switchAgent(targetId);
+    },
+    [agents, activeAgentId, switchAgent],
+  );
+
   const handleSwitchToAgent = useCallback(() => {
     setActiveMode("agent");
   }, [setActiveMode]);
@@ -710,20 +887,109 @@ ${code}
     [updateActiveMessages],
   );
 
-  const handleConfirmPlan = useCallback(
-    (_msgId: string, steps: PlanStep[]) => {
-      const planText = steps.map((s) => `${s.index}. ${s.text}`).join("\n");
-      const prompt = `请按以下已确认的计划逐步执行：\n\n${planText}\n\n请从第 1 步开始，每步生成可执行的代码。`;
+  const planStepQueueRef = useRef<{
+    msgId: string;
+    steps: PlanStep[];
+    idx: number;
+  } | null>(null);
+
+  const handleExecuteStep = useCallback(
+    async (msgId: string, stepIndex: number) => {
+      const msg = messages.find((m) => m.id === msgId);
+      if (!msg?.planSteps) return;
+      const step = msg.planSteps.find((s) => s.index === stepIndex);
+      if (!step || step.status === "running") return;
+
+      updateActiveMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                planSteps: m.planSteps?.map((s) =>
+                  s.index === stepIndex
+                    ? { ...s, status: "running" as const }
+                    : s,
+                ),
+              }
+            : m,
+        ),
+      );
+
+      const totalSteps = msg.planSteps.length;
+      const prevResults = (msg.planSteps || [])
+        .filter((s) => s.status === "success" && s.result)
+        .map((s) => `步骤 ${s.index} 结果: ${s.result}`)
+        .join("\n");
+
+      let sheetList = "";
+      try {
+        const freshCtx = await getWpsContext();
+        if (freshCtx?.sheetNames?.length) {
+          sheetList = freshCtx.sheetNames.join(", ");
+        }
+      } catch {}
+
+      const originalTask =
+        messagesRef.current.find(
+          (m) => m.role === "user" && !m.isAutoContinue && !m.isStepExecution,
+        )?.content || "";
+
+      const contextLines: string[] = [];
+      if (prevResults) contextLines.push(`[前序步骤结果]\n${prevResults}`);
+      if (sheetList)
+        contextLines.push(`当前工作簿的 Sheet: ${sheetList}`);
+      if (originalTask) contextLines.push(`原始任务: ${originalTask}`);
+
+      const contextPrefix =
+        contextLines.length > 0 ? contextLines.join("\n") + "\n\n" : "";
+
       setActiveMode("agent");
-      handleSend(prompt);
+      handleSend(
+        `${contextPrefix}请执行以下步骤（仅这一步）：\n\n${step.text}\n\n请联网搜索获取最新信息（如果涉及公司/股票/财务数据），然后生成可执行的代码。要求：\n- 如果联网搜索超时或失败，直接使用行业合理估计值，不要反复重试搜索\n- 数值参数使用蓝色字体，方便分析师后续调整\n- 完成后简要说明结果。`,
+        true,
+        `▶ 执行步骤 ${stepIndex}/${totalSteps}: ${step.text}`,
+        true,
+      );
     },
-    [setActiveMode],
+    [messages, updateActiveMessages, setActiveMode],
+  );
+
+  const handleSkipStep = useCallback(
+    (msgId: string, stepIndex: number) => {
+      updateActiveMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                planSteps: m.planSteps?.map((s) =>
+                  s.index === stepIndex
+                    ? { ...s, status: "skipped" as const }
+                    : s,
+                ),
+              }
+            : m,
+        ),
+      );
+    },
+    [updateActiveMessages],
+  );
+
+  const handleConfirmPlan = useCallback(
+    (msgId: string, steps: PlanStep[]) => {
+      const pending = steps.filter((s) => !s.status || s.status === "pending");
+      if (pending.length === 0) return;
+
+      planStepQueueRef.current = { msgId, steps, idx: 0 };
+      handleExecuteStep(msgId, pending[0].index);
+    },
+    [handleExecuteStep],
   );
 
   const handleSend = async (
     text?: string,
     _autoContinue?: boolean,
     _displayOverride?: string,
+    _isStepExecution?: boolean,
   ) => {
     const userText = (text ?? input).trim();
     if (!userText || (loading && !_autoContinue)) return;
@@ -811,7 +1077,7 @@ ${code}
           {
             id: nanoid(),
             role: "assistant",
-            content: `❌ 工作流启动失败: ${err instanceof Error ? err.message : String(err)}`,
+            content: `**提示**：工作流启动失败 — ${friendlyErrorMessage(err instanceof Error ? err.message : String(err))}`,
             timestamp: Date.now(),
             isError: true,
           },
@@ -833,12 +1099,6 @@ ${code}
           content: userText,
           timestamp: Date.now(),
         },
-        {
-          id: nanoid(),
-          role: "assistant",
-          content: `🤝 正在组建 Agent 团队来处理: **${goal}**\n\n正在分析任务并分派子任务...`,
-          timestamp: Date.now(),
-        },
       ]);
       try {
         const resp = await fetch("http://127.0.0.1:3001/v3/team/start", {
@@ -849,6 +1109,8 @@ ${code}
         const data = await resp.json();
         if (data.ok && data.team) {
           setTeamTask(data.team);
+        } else {
+          throw new Error(data.error || "启动失败");
         }
       } catch (err) {
         updateActiveMessages((prev) => [
@@ -856,7 +1118,7 @@ ${code}
           {
             id: nanoid(),
             role: "assistant",
-            content: `❌ 团队启动失败: ${err instanceof Error ? err.message : String(err)}`,
+            content: `**提示**：团队启动失败 — ${friendlyErrorMessage(err instanceof Error ? err.message : String(err))}`,
             timestamp: Date.now(),
             isError: true,
           },
@@ -897,6 +1159,7 @@ ${code}
 
     if (!_autoContinue) {
       autoContinueRoundRef.current = 0;
+      autoRetryCountRef.current = 0;
       const COMPLEX_TASK =
         /dcf|估值|建模|财务模型|完整.*模型|多.*sheet|多.*表|分析.*报告|全面|comprehensive/i;
       const MEDIUM_TASK = /图表|chart|可视化|dashboard|仪表盘|对比.*分析|趋势/i;
@@ -973,6 +1236,7 @@ ${code}
       content: displayContent,
       timestamp: Date.now(),
       isAutoContinue: !!_autoContinue,
+      isStepExecution: !!_isStepExecution,
     };
 
     const assistantMsgId = nanoid();
@@ -1004,15 +1268,53 @@ ${code}
 
     analytics.chatSend(modeSnapshot, modelSnapshot);
 
+    let liveCtx = wpsCtx ?? {
+      workbookName: "",
+      sheetNames: [],
+      selection: null,
+    };
+    try {
+      const fresh = await getWpsContext();
+      if (fresh?.sheetNames?.length) {
+        liveCtx = fresh;
+        setWpsCtx(fresh);
+      }
+    } catch {}
+
     try {
       await sendMessage(
         userText,
         messages.filter((m) => !m.id.startsWith("welcome")),
-        wpsCtx ?? { workbookName: "", sheetNames: [], selection: null },
+        liveCtx,
         {
           onThinking: (text) => {
             if (aborted) return;
             thinkingText += text;
+            // #region agent log
+            fetch(
+              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "34f850",
+                },
+                body: JSON.stringify({
+                  sessionId: "34f850",
+                  location: "App.tsx:onThinking",
+                  message: "onThinking callback fired",
+                  data: {
+                    chunkLen: text.length,
+                    totalLen: thinkingText.length,
+                    agentId,
+                    msgId: assistantMsgId,
+                  },
+                  timestamp: Date.now(),
+                  hypothesisId: "H-THINK",
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
             updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
@@ -1022,6 +1324,27 @@ ${code}
             );
           },
           onToken: (token) => {
+            // #region agent log
+            if (!firstTokenReceived) {
+              fetch(
+                "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Debug-Session-Id": "eab716",
+                  },
+                  body: JSON.stringify({
+                    sessionId: "eab716",
+                    location: "App.tsx:onToken",
+                    message: "First token received",
+                    data: { tokenLen: token.length, aborted },
+                    timestamp: Date.now(),
+                  }),
+                },
+              ).catch(() => {});
+            }
+            // #endregion
             if (aborted) return;
             fullText += token;
             const updates: Partial<ChatMessage> = { content: fullText };
@@ -1050,7 +1373,50 @@ ${code}
             if (aborted) return;
             setActiveAgentRef(info.name, info.color);
           },
+          onPlanCreated: (steps, originalTask) => {
+            if (aborted) return;
+            const planSteps = steps.map((s) => ({
+              ...s,
+              status: "pending" as const,
+            }));
+            updateAgentMessages(agentId, (prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      planSteps,
+                      content:
+                        m.content ||
+                        `正在为以下任务制定执行计划...\n\n> ${originalTask}`,
+                    }
+                  : m,
+              ),
+            );
+          },
           onComplete: async (text, provenance, flags) => {
+            // #region agent log
+            fetch(
+              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "eab716",
+                },
+                body: JSON.stringify({
+                  sessionId: "eab716",
+                  location: "App.tsx:onComplete",
+                  message: "onComplete called",
+                  data: {
+                    textLen: text?.length || 0,
+                    aborted,
+                    hasProvenance: !!provenance,
+                  },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
             if (aborted) return;
             const tokenLimitHit = flags?.tokenLimitHit ?? false;
             const prov = provenance
@@ -1110,7 +1476,7 @@ ${code}
                       content: text,
                       isStreaming: false,
                       codeBlocks,
-                      planSteps,
+                      planSteps: planSteps ?? m.planSteps,
                       provenance: prov,
                     }
                   : m,
@@ -1120,6 +1486,7 @@ ${code}
             const shouldAutoExecute = modeSnapshot === "agent";
 
             if (
+              !planStepQueueRef.current &&
               tokenLimitHit &&
               codeBlocks.length === 0 &&
               shouldAutoExecute &&
@@ -1142,15 +1509,24 @@ ${code}
             }
 
             // 只自动执行 JS 和 JSON action；Shell/Python/HTML 需要用户手动确认
-            const CONFIRM_LANGS = ["bash","shell","sh","zsh","terminal","python","py","html","htm"];
-            const execBlocks = codeBlocks.filter(
-              (b) => {
-                const lang = (b.language || "").toLowerCase();
-                if (CONFIRM_LANGS.includes(lang)) return false;
-                if (lang === "json" && !b.code.trim().startsWith('{"_action"')) return false;
-                return true;
-              },
-            );
+            const CONFIRM_LANGS = [
+              "bash",
+              "shell",
+              "sh",
+              "zsh",
+              "terminal",
+              "python",
+              "py",
+              "html",
+              "htm",
+            ];
+            const execBlocks = codeBlocks.filter((b) => {
+              const lang = (b.language || "").toLowerCase();
+              if (CONFIRM_LANGS.includes(lang)) return false;
+              if (lang === "json" && !b.code.trim().startsWith('{"_action"'))
+                return false;
+              return true;
+            });
 
             if (shouldAutoExecute && execBlocks.length > 0) {
               setApplyingMsgId(assistantMsgId);
@@ -1159,10 +1535,62 @@ ${code}
               for (let _bi = 0; _bi < execBlocks.length; _bi++) {
                 const block = execBlocks[_bi];
                 try {
-                  const { result, diff } = await executeCode(
-                    block.code,
-                    agentId,
-                  );
+                  let execResult: {
+                    result: string;
+                    diff?: import("./types").DiffResult | null;
+                  };
+                  try {
+                    execResult = await executeCode(block.code, agentId);
+                  } catch (firstErr) {
+                    // #region agent log
+                    fetch(
+                      "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                      {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "X-Debug-Session-Id": "f532b6",
+                        },
+                        body: JSON.stringify({
+                          sessionId: "f532b6",
+                          location: "App.tsx:catch-first",
+                          message: "caught error from executeCode",
+                          data: {
+                            errName: (firstErr as Error)?.name,
+                            errMsg: (firstErr as Error)?.message,
+                            isBlockedError: firstErr instanceof BlockedError,
+                          },
+                          timestamp: Date.now(),
+                        }),
+                      },
+                    ).catch(() => {});
+                    // #endregion
+                    if (firstErr instanceof BlockedError) {
+                      // #region agent log
+                      fetch(
+                        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            "X-Debug-Session-Id": "f532b6",
+                          },
+                          body: JSON.stringify({
+                            sessionId: "f532b6",
+                            location: "App.tsx:retry-force",
+                            message: "Retrying with force=true",
+                            data: { agentId },
+                            timestamp: Date.now(),
+                          }),
+                        },
+                      ).catch(() => {});
+                      // #endregion
+                      execResult = await executeCode(block.code, agentId, true);
+                    } else {
+                      throw firstErr;
+                    }
+                  }
+                  const { result, diff } = execResult;
                   execResults.push(
                     `[OK] ${result || "执行成功"}` +
                       (diff?.changeCount
@@ -1183,6 +1611,29 @@ ${code}
                 } catch (err) {
                   const errorMsg =
                     err instanceof Error ? err.message : String(err);
+                  // #region agent log
+                  fetch(
+                    "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "X-Debug-Session-Id": "eab716",
+                      },
+                      body: JSON.stringify({
+                        sessionId: "eab716",
+                        location: "App.tsx:autoExec:error",
+                        message: "Auto-exec JS failed",
+                        data: {
+                          errorMsg,
+                          blockLang: block.language,
+                          codeHead: block.code?.substring(0, 120),
+                        },
+                        timestamp: Date.now(),
+                      }),
+                    },
+                  ).catch(() => {});
+                  // #endregion
                   execResults.push(`[ERR] 执行失败: ${errorMsg}`);
                   execFailed = true;
                   updateAgentMessages(agentId, (prev) =>
@@ -1201,7 +1652,11 @@ ${code}
               }
               setApplyingMsgId(null);
 
+              // 计划步骤模式下跳过 autoContinue，由步骤队列统一推进
+              const inPlanStepMode = !!planStepQueueRef.current;
+
               if (
+                !inPlanStepMode &&
                 !execFailed &&
                 !aborted &&
                 autoContinueRoundRef.current < maxAutoContinueRef.current
@@ -1234,33 +1689,224 @@ ${code}
                 return;
               }
               if (execFailed) {
+                const retryRound = (autoRetryCountRef.current ?? 0) + 1;
+                const MAX_AUTO_RETRY = 2;
+                if (retryRound <= MAX_AUTO_RETRY) {
+                  autoRetryCountRef.current = retryRound;
+                  const failedBlock = execBlocks.find(
+                    (b) => execResults.some((r) => r.startsWith("[ERR]")) && b,
+                  );
+                  const failedError =
+                    execResults
+                      .find((r) => r.startsWith("[ERR]"))
+                      ?.replace("[ERR] 执行失败: ", "") || "未知错误";
+                  const codeSnippet =
+                    failedBlock?.code?.substring(0, 600) || "";
+                  // #region agent log
+                  fetch(
+                    "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "X-Debug-Session-Id": "eab716",
+                      },
+                      body: JSON.stringify({
+                        sessionId: "eab716",
+                        location: "App.tsx:autoRetry",
+                        message: "Auto-retrying after exec failure",
+                        data: {
+                          retryRound,
+                          failedError,
+                          codeLen: codeSnippet.length,
+                        },
+                        timestamp: Date.now(),
+                      }),
+                    },
+                  ).catch(() => {});
+                  // #endregion
+                  const retryPrompt =
+                    `代码执行出错（自动重试 ${retryRound}/${MAX_AUTO_RETRY}），请修复并重新生成完整代码。\n\n` +
+                    `**错误信息：**\n\`\`\`\n${failedError}\n\`\`\`\n\n` +
+                    `**失败代码片段：**\n\`\`\`javascript\n${codeSnippet}\n\`\`\`\n\n` +
+                    `请分析错误原因，直接输出修复后的完整 JavaScript 代码块。严格要求：\n` +
+                    `- 代码块内只能有合法 JavaScript，绝对不能混入中文说明、数字标注或注释性文字\n` +
+                    `- 外部API数据需做防御性检查（判断返回值是否 undefined）\n` +
+                    `- 使用 try/catch 包裹可能出错的操作\n` +
+                    `- 不要假设 API 返回固定结构\n` +
+                    `- 文字说明放在代码块外面，代码块内只有纯代码`;
+                  setAgentStatus(agentId, "idle");
+                  await handleSend(
+                    retryPrompt,
+                    true,
+                    `[自动修复 ${retryRound}/${MAX_AUTO_RETRY}] ${failedError}`,
+                  );
+                  return;
+                }
+                autoRetryCountRef.current = 0;
+                const failQueue = planStepQueueRef.current;
+                if (failQueue) {
+                  const failPending = failQueue.steps.filter(
+                    (s) => !s.status || s.status === "pending",
+                  );
+                  const failCurrent = failPending[failQueue.idx];
+                  if (failCurrent) {
+                    const failError =
+                      execResults
+                        .find((r) => r.startsWith("[ERR]"))
+                        ?.replace("[ERR] 执行失败: ", "") || "重试后仍然失败";
+                    updateActiveMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === failQueue.msgId
+                          ? {
+                              ...m,
+                              planSteps: m.planSteps?.map((s) =>
+                                s.index === failCurrent.index
+                                  ? {
+                                      ...s,
+                                      status: "failed" as const,
+                                      error: failError,
+                                    }
+                                  : s,
+                              ),
+                            }
+                          : m,
+                      ),
+                    );
+                  }
+                  failQueue.idx++;
+                  const failNext = failPending[failQueue.idx];
+                  if (failNext) {
+                    setAgentStatus(agentId, "idle");
+                    setTimeout(() => {
+                      handleExecuteStep(failQueue.msgId, failNext.index);
+                    }, 1000);
+                    return;
+                  }
+                  planStepQueueRef.current = null;
+                }
                 setAgentStatus(agentId, "failed");
                 return;
               }
             }
             setAgentStatus(agentId, "done");
+
+            // Plan step-by-step: 标记当前步骤完成，推进下一步
+            const queue = planStepQueueRef.current;
+            if (queue) {
+              const pendingSteps = queue.steps.filter(
+                (s) => !s.status || s.status === "pending",
+              );
+              const currentStep = pendingSteps[queue.idx];
+              if (currentStep) {
+                updateActiveMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === queue.msgId
+                      ? {
+                          ...m,
+                          planSteps: m.planSteps?.map((s) =>
+                            s.index === currentStep.index
+                              ? { ...s, status: "success" as const, done: true }
+                              : s,
+                          ),
+                        }
+                      : m,
+                  ),
+                );
+              }
+
+              queue.idx++;
+              const nextPending = pendingSteps[queue.idx];
+              if (nextPending) {
+                setTimeout(() => {
+                  handleExecuteStep(queue.msgId, nextPending.index);
+                }, 500);
+              } else {
+                planStepQueueRef.current = null;
+              }
+            }
           },
           onError: (err) => {
+            const raw = err.message || String(err);
+            // #region agent log
+            fetch(
+              "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "abaffc",
+                },
+                body: JSON.stringify({
+                  sessionId: "abaffc",
+                  location: "App.tsx:onError",
+                  message: "SSE onError triggered",
+                  data: { raw, friendlyMsg: friendlyErrorMessage(raw) },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
             const isProxyError =
-              err.message.includes("fetch") ||
-              err.message.includes("Failed") ||
-              err.message.includes("代理");
+              raw.includes("fetch") ||
+              raw.includes("Failed") ||
+              raw.includes("代理") ||
+              /ECONNREFUSED/.test(raw);
+            const userMsg = isProxyError
+              ? "无法连接代理服务器，请确认后台服务已启动。"
+              : friendlyErrorMessage(raw);
             updateAgentMessages(agentId, (prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
                   ? {
                       ...m,
-                      content: isProxyError
-                        ? "**错误**：无法连接代理服务器。\n\n请在终端运行：\n```\ncd ~/需求讨论/claude-wps-plugin\nnode proxy-server.js\n```"
-                        : `**错误**：${err.message}`,
+                      content: `**提示**：${userMsg}`,
                       isStreaming: false,
                       isError: true,
                     }
                   : m,
               ),
             );
-            setAgentStatus(agentId, "failed", err.message);
-            setProxyMissing(true);
+            setAgentStatus(agentId, isProxyError ? "failed" : "done", raw);
+            if (isProxyError) setProxyMissing(true);
+
+            const queue = planStepQueueRef.current;
+            if (queue) {
+              const pendingSteps = queue.steps.filter(
+                (s) => !s.status || s.status === "pending",
+              );
+              const currentStep = pendingSteps[queue.idx];
+              if (currentStep) {
+                updateActiveMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === queue.msgId
+                      ? {
+                          ...m,
+                          planSteps: m.planSteps?.map((s) =>
+                            s.index === currentStep.index
+                              ? {
+                                  ...s,
+                                  status: "failed" as const,
+                                  error: err.message,
+                                }
+                              : s,
+                          ),
+                        }
+                      : m,
+                  ),
+                );
+              }
+
+              queue.idx++;
+              const nextPending = pendingSteps[queue.idx];
+              if (nextPending && !isProxyError) {
+                setTimeout(() => {
+                  handleExecuteStep(queue.msgId, nextPending.index);
+                }, 1000);
+              } else {
+                planStepQueueRef.current = null;
+              }
+            }
           },
         },
         {
@@ -1278,20 +1924,93 @@ ${code}
         unexpectedErr instanceof Error
           ? unexpectedErr.message
           : String(unexpectedErr);
+      const errStack =
+        unexpectedErr instanceof Error
+          ? unexpectedErr.stack?.substring(0, 300)
+          : "";
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "abaffc",
+          },
+          body: JSON.stringify({
+            sessionId: "abaffc",
+            location: "App.tsx:unexpectedErr",
+            message: "Unexpected error in handleSend",
+            data: {
+              errMsg,
+              errStack,
+              friendlyMsg: friendlyErrorMessage(errMsg),
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
+      const isProxyError =
+        errMsg.includes("fetch") ||
+        errMsg.includes("Failed") ||
+        errMsg.includes("代理") ||
+        /ECONNREFUSED/.test(errMsg);
+      const userMsg = isProxyError
+        ? "无法连接代理服务器，请确认后台服务已启动。"
+        : friendlyErrorMessage(errMsg);
       updateAgentMessages(agentId, (prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
             ? {
                 ...m,
-                content: `**错误**：${errMsg}`,
+                content: `**提示**：${userMsg}`,
                 isStreaming: false,
                 isError: true,
               }
             : m,
         ),
       );
-      setAgentStatus(agentId, "failed", errMsg);
+      setAgentStatus(agentId, isProxyError ? "failed" : "done", errMsg);
+      if (isProxyError) setProxyMissing(true);
       setApplyingMsgId(null);
+
+      const queue = planStepQueueRef.current;
+      if (queue) {
+        const pendingSteps = queue.steps.filter(
+          (s) => !s.status || s.status === "pending",
+        );
+        const currentStep = pendingSteps[queue.idx];
+        if (currentStep) {
+          updateActiveMessages((prev) =>
+            prev.map((m) =>
+              m.id === queue.msgId
+                ? {
+                    ...m,
+                    planSteps: m.planSteps?.map((s) =>
+                      s.index === currentStep.index
+                        ? {
+                            ...s,
+                            status: "failed" as const,
+                            error: errMsg,
+                          }
+                        : s,
+                    ),
+                  }
+                : m,
+            ),
+          );
+        }
+        queue.idx++;
+        const nextPending = pendingSteps[queue.idx];
+        if (nextPending && !isProxyError) {
+          setTimeout(() => {
+            handleExecuteStep(queue.msgId, nextPending.index);
+          }, 1000);
+        } else {
+          planStepQueueRef.current = null;
+        }
+      }
     }
 
     if (aborted) {
@@ -1638,7 +2357,7 @@ ${code}
             <Claude.Color size={20} />
           </div>
           <div className={styles.logoName}>Claude for Excel</div>
-          <span className={styles.betaBadge}>v 2.2.0</span>
+          <span className={styles.betaBadge}>v 2.3.0</span>
           {heartbeatOk !== null && (
             <span
               className={styles.heartbeatDot}
@@ -1680,7 +2399,7 @@ ${code}
           activeAgentId={activeAgentId}
           expanded={agentListOpen}
           width={sidebarWidth}
-          onSwitch={switchAgent}
+          onSwitch={handleSwitchAgent}
           onNew={handleNewChat}
           onRemove={removeAgent}
         />
@@ -1698,7 +2417,7 @@ ${code}
             <AgentTabBar
               agents={agents}
               activeAgentId={activeAgentId}
-              onSwitch={switchAgent}
+              onSwitch={handleSwitchAgent}
               onClose={removeAgent}
             />
           )}
@@ -1749,6 +2468,8 @@ ${code}
                   onSwitchToAgent={handleSwitchToAgent}
                   onPlanStepsChange={handlePlanStepsChange}
                   onConfirmPlan={handleConfirmPlan}
+                  onExecuteStep={handleExecuteStep}
+                  onSkipStep={handleSkipStep}
                   onResubmit={!loading ? handleResubmit : undefined}
                   isLatestUser={msg.id === lastUserMsgId}
                 />

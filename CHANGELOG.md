@@ -2,6 +2,35 @@
 
 All notable changes to Claude for WPS Excel will be documented in this file.
 
+## [2.4.0] - 2026-03-09
+
+### Added
+- **Direct API 步骤执行**：计划步骤从 CLI（~29s 首 token）切换到 Direct API（~3-5s 首 token），大幅降低 Thinking 空白等待时间
+  - 步骤执行使用 Sonnet 模型 + 完整 system prompt（含技能）
+  - 启用 Extended Thinking（budget 10000 tokens），thinking 内容实时流式输出
+  - maxTokens 提升至 16384，支持完整代码生成
+  - 历史消息窗口从 3 条扩展到 6 条，保证足够的前序步骤上下文
+  - Direct API 失败时自动 fallback 到 CLI 路径
+- **自动重试机制**：JS 代码执行失败后自动将错误信息发回 AI 进行自我修复（最多 2 次重试）
+- **计划步骤容错**：重试耗尽后自动标记当前步骤为"失败"，继续执行后续步骤（不再卡死）
+- **关键词 Plan-first 兜底**：Direct API 不可用时，对 DCF 等复杂任务使用关键词匹配 + 硬编码计划模板
+- **友好错误消息映射**（errorMessages.ts）：将技术性 API 错误映射为用户可理解的提示文案
+
+### Changed
+- **CLI 空闲超时**：步骤执行（含 web search）超时从 120s 提升至 240s
+- **步骤执行 prompt 优化**：允许联网搜索，搜索失败时使用行业合理估计值
+- **Skill 加载上限**：BODY_BUDGET 从 15000 提升至 30000 字符
+- **Plan 区块样式**：图标和标题颜色从黄色改为中性灰色
+- **Thinking 条件渲染**：无思考内容时完全隐藏 Thinking 模块
+
+### Fixed
+- 修复 Thinking 模块左侧竖条残留、折叠箭头不可见/无法点击
+- 修复重新编辑输入框不支持 Cmd+A 等系统快捷键
+- 修复 /team 命令无法识别、提交后无回复
+- 修复自动重试触发 plan-first 误判
+- 修复 CLI 超时错误未映射到友好消息
+- 修复 proxy server 全局未捕获异常导致进程崩溃
+
 ## [2.2.0] - 2026-03-03
 
 ### Added

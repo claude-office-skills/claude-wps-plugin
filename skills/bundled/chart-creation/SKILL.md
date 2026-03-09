@@ -50,16 +50,16 @@ try {
   chart.ChartTitle.Text = "趋势分析";
 
   try {
-    chart.SeriesCollection(1).Format.Line.ForeColor.RGB = 0xFF4500;
-    chart.SeriesCollection(1).Format.Line.Weight = 2.5;
-    chart.SeriesCollection(2).Format.Line.ForeColor.RGB = 0x0000FF;
-    chart.SeriesCollection(2).Format.Line.Weight = 2.5;
-    chart.SeriesCollection(3).Format.Line.ForeColor.RGB = 0x00AA00;
-    chart.SeriesCollection(3).Format.Line.Weight = 2.5;
+    chart.SeriesCollection.Item(1).Format.Line.ForeColor.RGB = 0xFF4500;
+    chart.SeriesCollection.Item(1).Format.Line.Weight = 2.5;
+    chart.SeriesCollection.Item(2).Format.Line.ForeColor.RGB = 0x0000FF;
+    chart.SeriesCollection.Item(2).Format.Line.Weight = 2.5;
+    chart.SeriesCollection.Item(3).Format.Line.ForeColor.RGB = 0x00AA00;
+    chart.SeriesCollection.Item(3).Format.Line.Weight = 2.5;
   } catch(ce) {}
 
   try {
-    chart.SeriesCollection(1).Format.Fill.ForeColor.RGB = 0xE8A040;
+    chart.SeriesCollection.Item(1).Format.Fill.ForeColor.RGB = 0xE8A040;
   } catch(ce) {}
 } catch(e) {
   ws.Range("F1").Value2 = "趋势";

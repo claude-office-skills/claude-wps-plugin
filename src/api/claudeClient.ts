@@ -70,6 +70,10 @@ export interface StreamCallbacks {
   onModeInfo?: (mode: string, enforcement: Record<string, unknown>) => void;
   onActivity?: (activity: ActivityEvent) => void;
   onAgentInfo?: (agent: { name: string; color: string; model: string }) => void;
+  onPlanCreated?: (
+    steps: Array<{ index: number; text: string; done: boolean }>,
+    originalTask: string,
+  ) => void;
 }
 
 /** 检查代理服务器是否在运行 */
@@ -113,6 +117,29 @@ function processSseLines(
     if (!data) continue;
     try {
       const event = JSON.parse(data);
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "claudeClient.ts:processSseLines",
+            message: `SSE parsed: ${event.type}`,
+            data: {
+              type: event.type,
+              textLen: event.text?.length || 0,
+              fullTextLen: fullTextRef.v.length,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       if (event.type === "agent_info") {
         callbacks.onAgentInfo?.({
           name: event.agent,
@@ -148,7 +175,32 @@ function processSseLines(
             }
           ).tokenLimitHit = true;
         }
+      } else if (event.type === "plan_created") {
+        callbacks.onPlanCreated?.(event.steps, event.originalTask);
       } else if (event.type === "error") {
+        // #region agent log
+        fetch(
+          "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "eab716",
+            },
+            body: JSON.stringify({
+              sessionId: "eab716",
+              location: "claudeClient.ts:SSE-error-detail",
+              message: "SSE error event detail",
+              data: {
+                errorMessage: event.message,
+                fullTextLen: fullTextRef.v.length,
+                eventKeys: Object.keys(event),
+              },
+              timestamp: Date.now(),
+            }),
+          },
+        ).catch(() => {});
+        // #endregion
         throw new Error(event.message);
       }
     } catch (parseErr) {
@@ -201,7 +253,7 @@ export async function sendMessage(
   };
   let prevLen = 0;
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${PROXY_BASE}/chat`, true);
     xhr.setRequestHeader("Content-Type", "application/json");
@@ -222,12 +274,13 @@ export async function sendMessage(
       if (fullTextRef.v) {
         callbacks.onComplete(fullTextRef.v, provenanceRef.v);
       } else {
-        reject(
+        callbacks.onError(
           new Error(
             "请求超时（超过 5 分钟），请检查网络连接或切换到 Haiku 模型重试",
           ),
         );
       }
+      resolve();
     };
 
     xhr.onprogress = () => {
@@ -250,14 +303,43 @@ export async function sendMessage(
       } catch (err) {
         aborted = true;
         xhr.abort();
-        reject(err instanceof Error ? err : new Error(String(err)));
+        const error = err instanceof Error ? err : new Error(String(err));
+        callbacks.onError(error);
+        resolve();
       }
     };
 
     xhr.onload = () => {
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "claudeClient.ts:onload",
+            message: "XHR onload",
+            data: {
+              status: xhr.status,
+              aborted,
+              fullTextLen: fullTextRef.v.length,
+              responseLen: xhr.responseText?.length || 0,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       if (aborted) return;
       if (xhr.status !== 200) {
-        reject(new Error(`代理服务器错误 ${xhr.status}: ${xhr.responseText}`));
+        callbacks.onError(
+          new Error(`代理服务器错误 ${xhr.status}: ${xhr.responseText}`),
+        );
+        resolve();
         return;
       }
       const finalText = xhr.responseText;
@@ -268,7 +350,10 @@ export async function sendMessage(
         try {
           processSseLines(buffer, fullTextRef, callbacks, provenanceRef);
         } catch (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
+          callbacks.onError(
+            err instanceof Error ? err : new Error(String(err)),
+          );
+          resolve();
           return;
         }
       }
@@ -281,6 +366,25 @@ export async function sendMessage(
     };
 
     xhr.onerror = () => {
+      // #region agent log
+      fetch(
+        "http://127.0.0.1:7244/ingest/63acb95d-6f91-4165-a07a-5bab2abb61eb",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "eab716",
+          },
+          body: JSON.stringify({
+            sessionId: "eab716",
+            location: "claudeClient.ts:onerror",
+            message: "XHR onerror",
+            data: { aborted, fullTextLen: fullTextRef.v.length },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
+      // #endregion
       if (aborted) {
         if (fullTextRef.v) {
           callbacks.onComplete(fullTextRef.v, provenanceRef.v);
@@ -288,7 +392,10 @@ export async function sendMessage(
         resolve();
         return;
       }
-      reject(new Error("无法连接代理服务器，请检查 proxy-server 是否运行"));
+      callbacks.onError(
+        new Error("无法连接代理服务器，请检查 proxy-server 是否运行"),
+      );
+      resolve();
     };
 
     xhr.onabort = () => {
