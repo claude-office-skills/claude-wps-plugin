@@ -1,0 +1,54 @@
+id: yahoo-finance
+name: Yahoo Finance 金融数据
+version: 1.0.0
+description: 通过 yfinance 获取全球上市公司的股票、财务报表、估值比率等结构化数据
+
+credentials: []
+
+actions:
+  - id: stock_info
+    name: 综合财务数据
+    description: 公司概况、关键比率、历史损益表、资产负债表、现金流量表
+    params:
+      - name: ticker
+        type: string
+        required: true
+        description: "股票代码，如 AAPL、0700.HK、601899.SS"
+  - id: stock_price
+    name: 历史价格
+    description: 历史 K 线数据（开高低收量）
+    params:
+      - name: ticker
+        type: string
+        required: true
+      - name: range
+        type: string
+        default: "1y"
+        description: "时间范围：1d/5d/1mo/3mo/6mo/1y/2y/5y/max"
+      - name: interval
+        type: string
+        default: "1d"
+        description: "K线周期：1d/1wk/1mo"
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+  max_entries: 200
+
+skill_keywords:
+  - 股票
+  - 股价
+  - 财报
+  - 财务数据
+  - 市盈率
+  - PE
+  - PB
+  - ROE
+  - EBITDA
+  - 市值
+  - 营收
+  - 净利
+  - ticker
+  - yahoo
+  - 数据源
+  - 金融数据

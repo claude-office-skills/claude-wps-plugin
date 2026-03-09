@@ -628,6 +628,32 @@ function _processAnimRow() {
   st.tickWait = 1;
 }
 
+// ── Data Bridge — 可插拔连接器统一数据拉取接口 ──────────
+function dataBridgePull(connectorId, action, params) {
+  var body = JSON.stringify({
+    connectorId: connectorId,
+    action: action,
+    params: params || {},
+  });
+  var resp = httpPost(PROXY_URL + "/data-bridge/pull", body);
+  if (!resp) return { ok: false, error: "网络请求失败" };
+  try {
+    return JSON.parse(resp);
+  } catch (e) {
+    return { ok: false, error: "响应解析失败: " + resp.substring(0, 100) };
+  }
+}
+
+function dataBridgeList() {
+  var resp = httpGet(PROXY_URL + "/data-bridge/connectors");
+  if (!resp) return [];
+  try {
+    return JSON.parse(resp);
+  } catch (e) {
+    return [];
+  }
+}
+
 // ── 预注册函数表 — AI 可直接调用，避免生成完整代码 ──────
 var actionRegistry = {
   fillColor: function (range, bgrColor) {
@@ -731,7 +757,10 @@ function executeInWps(code) {
       "function _sheet(name){var wb=Application.ActiveWorkbook;" +
       "for(var i=1;i<=wb.Sheets.Count;i++){if(wb.Sheets.Item(i).Name===name)return wb.Sheets.Item(i);}" +
       "return null;}\n";
-    var wrappedCode = safeSheetGet + code;
+    var bridgeInject =
+      "var dataBridgePull=" + dataBridgePull.toString() + ";\n" +
+      "var dataBridgeList=" + dataBridgeList.toString() + ";\n";
+    var wrappedCode = safeSheetGet + bridgeInject + code;
     var fn = new Function(wrappedCode);
     var result = fn();
     return result === undefined ? "执行成功" : String(result);

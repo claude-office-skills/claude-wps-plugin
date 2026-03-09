@@ -81,6 +81,7 @@ import {
 import { dispatchAgent } from "./lib/agent-dispatcher.js";
 import { runHooks } from "./lib/hook-engine.js";
 import { startTeam, getTeamStatus } from "./lib/agent-team.js";
+import connectorRegistry from "./lib/connector-registry.js";
 
 // Initialize v2.2.0 subsystems on startup
 ensureMemoryDirs();
@@ -1249,6 +1250,60 @@ else:
     console.error(`[finance-data] ${ticker}/price error:`, err.message);
     res.status(500).json({ error: err.message, ticker });
   }
+});
+
+// ── Data Bridge API（可插拔连接器统一入口）──────────────────────
+
+app.post("/data-bridge/pull", async (req, res) => {
+  const { connectorId, action, params } = req.body || {};
+  if (!connectorId || !action) {
+    return res.status(400).json({
+      ok: false,
+      error: "缺少 connectorId 或 action",
+      code: "BAD_REQUEST",
+    });
+  }
+  const result = await connectorRegistry.pull(connectorId, action, params || {});
+  const status = result.ok ? 200 : (result.code === "CONNECTOR_NOT_FOUND" ? 404 : 400);
+  res.status(status).json(result);
+});
+
+app.get("/data-bridge/connectors", (_req, res) => {
+  res.json(connectorRegistry.list());
+});
+
+app.post("/data-bridge/connectors/:id/credentials", (req, res) => {
+  const { id } = req.params;
+  const creds = req.body;
+  if (!creds || typeof creds !== "object") {
+    return res.status(400).json({ error: "请求体需为 JSON 对象" });
+  }
+  if (!connectorRegistry.has(id)) {
+    return res.status(404).json({ error: `连接器 "${id}" 未找到` });
+  }
+  connectorRegistry.setCredentials(id, creds);
+  res.json({ ok: true, message: `连接器 "${id}" 凭证已更新` });
+});
+
+app.get("/data-bridge/connectors/:id/credential-schema", (req, res) => {
+  const schema = connectorRegistry.getCredentialSchema(req.params.id);
+  if (!schema) return res.status(404).json({ error: "连接器未找到" });
+  res.json(schema);
+});
+
+app.post("/data-bridge/connectors/:id/toggle", (req, res) => {
+  const { id } = req.params;
+  const { enabled } = req.body || {};
+  if (!connectorRegistry.has(id)) {
+    return res.status(404).json({ error: `连接器 "${id}" 未找到` });
+  }
+  connectorRegistry.setEnabled(id, enabled !== false);
+  res.json({ ok: true, enabled: enabled !== false });
+});
+
+app.post("/data-bridge/reload", async (_req, res) => {
+  await connectorRegistry.reload();
+  res.json({ ok: true, count: connectorRegistry.size, connectors: connectorRegistry.list() });
 });
 
 // ── Skills 列表 API（调试用）─────────────────────────────────
@@ -4999,6 +5054,12 @@ if (existsSync(distPath)) {
     res.sendFile(join(distPath, "index.html"));
   });
 }
+
+connectorRegistry.load().then(() => {
+  console.log(`[connector-registry] Ready (${connectorRegistry.size} connectors)`);
+}).catch((err) => {
+  console.error("[connector-registry] Init failed:", err.message);
+});
 
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`\n✅ WPS Claude 代理服务器 v2.6.0 已启动`);
