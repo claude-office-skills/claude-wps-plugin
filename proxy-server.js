@@ -1282,7 +1282,23 @@ app.post("/data-bridge/connectors/:id/credentials", (req, res) => {
     return res.status(404).json({ error: `连接器 "${id}" 未找到` });
   }
   connectorRegistry.setCredentials(id, creds);
-  res.json({ ok: true, message: `连接器 "${id}" 凭证已更新` });
+  const status = connectorRegistry.getCredentialStatus(id);
+  res.json({ ok: true, message: `连接器 "${id}" 凭证已更新（加密存储）`, status });
+});
+
+app.delete("/data-bridge/connectors/:id/credentials", (req, res) => {
+  const { id } = req.params;
+  if (!connectorRegistry.has(id)) {
+    return res.status(404).json({ error: `连接器 "${id}" 未找到` });
+  }
+  connectorRegistry.removeCredentials(id);
+  res.json({ ok: true, message: `连接器 "${id}" 凭证已清除` });
+});
+
+app.get("/data-bridge/connectors/:id/credential-status", (req, res) => {
+  const status = connectorRegistry.getCredentialStatus(req.params.id);
+  if (!status) return res.status(404).json({ error: "连接器未找到" });
+  res.json({ connectorId: req.params.id, credentials: status });
 });
 
 app.get("/data-bridge/connectors/:id/credential-schema", (req, res) => {
