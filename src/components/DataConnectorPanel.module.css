@@ -1,0 +1,472 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.panel {
+  width: 320px;
+  height: 100%;
+  background: var(--bg-base);
+  border-left: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.panelTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.closeBtn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+
+.closeBtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* 连接器列表 */
+.connectorList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+.connectorList::-webkit-scrollbar {
+  width: 3px;
+}
+
+.connectorList::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+}
+
+/* 单个连接器卡片 */
+.connectorCard {
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--bg-surface);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.connectorCard:hover {
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.cardLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.connectorIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.connectorName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusBadge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.statusConnected {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.statusPending {
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-primary);
+}
+
+.statusDisabled {
+  color: var(--text-placeholder);
+  background: var(--bg-elevated);
+}
+
+.cardDesc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+/* 凭证状态 */
+.credentialRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.credentialDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.credentialDotOk {
+  background: var(--success);
+}
+
+.credentialDotMissing {
+  background: var(--error);
+}
+
+.credentialLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 操作按钮行 */
+.cardActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.actionBtn {
+  flex: 1;
+  height: 28px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.actionBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+.actionBtnPrimary {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.actionBtnPrimary:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.actionBtnDanger {
+  color: var(--error);
+}
+
+.actionBtnDanger:hover {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+/* 凭证输入表单 */
+.credForm {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--bg-base);
+  border-radius: 8px;
+  border: 1px solid var(--border-primary);
+}
+
+.credFormTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.credFieldGroup {
+  margin-bottom: 6px;
+}
+
+.credFieldLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.credFieldInput {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.credFieldInput:focus {
+  border-color: var(--accent);
+}
+
+.credFieldInput::placeholder {
+  color: var(--text-placeholder);
+}
+
+.credFormActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.credFormBtn {
+  flex: 1;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.credFormBtnSave {
+  background: var(--accent);
+  color: #fff;
+}
+
+.credFormBtnSave:hover {
+  background: var(--accent-hover);
+}
+
+.credFormBtnSave:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.credFormBtnCancel {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.credFormBtnCancel:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Actions 可用列表 */
+.actionsList {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg-base);
+  border-radius: 8px;
+  border: 1px solid var(--border-primary);
+}
+
+.actionsTitle {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.actionItem {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 3px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.actionId {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.actionName {
+  color: var(--text-muted);
+}
+
+/* 底部导入提示 */
+.importHint {
+  padding: 12px 16px;
+  border-top: 1px solid var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.importHintText {
+  font-size: 10px;
+  color: var(--text-placeholder);
+  line-height: 1.5;
+}
+
+.importHintPath {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* 加载状态 */
+.loadingState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  color: var(--text-placeholder);
+  font-size: 12px;
+}
+
+/* 空状态 */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 16px;
+  color: var(--text-placeholder);
+  font-size: 13px;
+}
+
+/* Toggle 开关 */
+.toggle {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--bg-hover);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggleOn {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+}
+
+.toggleOn::after {
+  transform: translateX(14px);
+  background: var(--accent);
+}
+
+/* 消息提示 */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  z-index: 200;
+  animation: fadeInUp 0.2s ease-out;
+}
+
+.toastSuccess {
+  background: var(--success);
+  color: #fff;
+}
+
+.toastError {
+  background: var(--error);
+  color: #fff;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

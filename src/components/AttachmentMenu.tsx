@@ -6,6 +6,7 @@ interface Props {
   onFileAttach: (file: AttachmentFile) => void;
   webSearchEnabled: boolean;
   onToggleWebSearch: () => void;
+  onOpenConnectors?: () => void;
   disabled?: boolean;
 }
 
@@ -13,6 +14,7 @@ const AttachmentMenu = memo(function AttachmentMenu({
   onFileAttach,
   webSearchEnabled,
   onToggleWebSearch,
+  onOpenConnectors,
   disabled,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -149,12 +151,15 @@ const AttachmentMenu = memo(function AttachmentMenu({
           </button>
 
           <button
-            className={`${styles.menuItem} ${styles.menuItemDisabled}`}
-            disabled
+            className={styles.menuItem}
+            onClick={() => {
+              setOpen(false);
+              onOpenConnectors?.();
+            }}
           >
             <span className={styles.menuIcon}><LinkIcon /></span>
-            <span className={styles.menuLabel}>连接器</span>
-            <span className={styles.menuSoon}>Coming soon</span>
+            <span className={styles.menuLabel}>数据源</span>
+            <ConnectorStatusDot />
           </button>
         </div>
       )}
@@ -205,6 +210,31 @@ function LinkIcon() {
       <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
       <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
     </svg>
+  );
+}
+
+function ConnectorStatusDot() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    fetch("http://127.0.0.1:3001/data-bridge/connectors")
+      .then((r) => r.json())
+      .then((list: Array<{ enabled: boolean; hasCredentials: boolean }>) => {
+        setCount(list.filter((c) => c.enabled && c.hasCredentials).length);
+      })
+      .catch(() => {});
+  }, []);
+  if (count === 0) return null;
+  return (
+    <span style={{
+      fontSize: 10,
+      color: "var(--success)",
+      background: "var(--success-bg)",
+      padding: "1px 6px",
+      borderRadius: 4,
+      fontWeight: 500,
+    }}>
+      {count} 已连接
+    </span>
   );
 }
 

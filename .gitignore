@@ -22,6 +22,12 @@ lerna-debug.log*
 .env.local
 .env.*.local
 
+# Credential vault and imported keys (runtime only, never commit)
+credential-vault.json
+*.vault.json
+credentials/
+certificate/
+
 # Local session data
 .chat-history/
 

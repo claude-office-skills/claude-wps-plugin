@@ -106,6 +106,15 @@ cpSync(join(__dirname, "wps-addon"), join(OUT, "wps-addon"), { recursive: true }
 cpSync(join(__dirname, "lib"), join(OUT, "lib"), { recursive: true });
 cpSync(join(__dirname, "agents"), join(OUT, "agents"), { recursive: true });
 cpSync(join(__dirname, "hooks"), join(OUT, "hooks"), { recursive: true });
+
+log("Copying bundled connectors (code only, no credentials)...");
+const connectorsOut = join(OUT, "connectors");
+mkdirSync(connectorsOut, { recursive: true });
+for (const entry of readdirSync(join(__dirname, "connectors"), { withFileTypes: true })) {
+  if (!entry.isDirectory() || entry.name.startsWith("_") || entry.name.startsWith(".")) continue;
+  cpSync(join(__dirname, "connectors", entry.name), join(connectorsOut, entry.name), { recursive: true });
+}
+cpSync(join(__dirname, "connectors", "_generic-rest"), join(connectorsOut, "_generic-rest"), { recursive: true });
 cpSync(join(__dirname, "package.json"), join(OUT, "package.json"));
 cpSync(join(__dirname, ".env.example"), join(OUT, ".env.example"));
 
@@ -156,7 +165,28 @@ if (existsSync(join(OUT, "dist", "main.js"))) {
   );
 }
 
-// ── Step 5: Create tarball ──────────────────────────────────
+// ── Step 5: Security — verify no credentials in package ─────
+log("Security check: verifying no credentials in package...");
+const FORBIDDEN = [".enc", ".key", ".token", "credentials", "vault", "certificate", ".env"];
+function checkDir(dir, prefix = "") {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const name = e.name.toLowerCase();
+    if (FORBIDDEN.some((f) => name.includes(f)) && !name.endsWith(".js") && !name.endsWith(".example")) {
+      throw new Error(`SECURITY: forbidden file in package: ${prefix}${e.name}`);
+    }
+    if (e.isDirectory()) checkDir(join(dir, e.name), `${prefix}${e.name}/`);
+  }
+}
+try {
+  checkDir(OUT);
+  log("Security check passed ✓");
+} catch (err) {
+  console.error(err.message);
+  rmSync(STAGE, { recursive: true });
+  process.exit(1);
+}
+
+// ── Step 6: Create tarball ──────────────────────────────────
 log("Creating tarball...");
 execSync(
   `cd "${STAGE}" && tar -czf "${TARBALL_OUT}" claude-wps-plugin/`,
@@ -166,7 +196,7 @@ execSync(
 const size = (readFileSync(TARBALL_OUT).length / 1024).toFixed(0);
 log(`Tarball created: ${TARBALL_OUT} (${size} KB)`);
 
-// ── Step 6: Compute SHA256 ──────────────────────────────────
+// ── Step 7: Compute SHA256 ──────────────────────────────────
 const sha = execSync(`shasum -a 256 "${TARBALL_OUT}"`)
   .toString()
   .split(" ")[0]

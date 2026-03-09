@@ -1,0 +1,87 @@
+id: sensortower
+name: SensorTower 移动应用数据
+version: 1.0.0
+description: 移动应用商店下载量、收入、DAU/MAU 等情报数据（iOS + Android）
+
+credentials:
+  - key: auth_token
+    label: API Token
+    required: true
+    description: "SensorTower API 认证令牌（形如 ST0_AyJSe7nc_...）"
+
+actions:
+  - id: app_sales
+    name: 应用下载与收入
+    description: 获取指定 App 的下载量和收入估算数据（按国家、日期）
+    params:
+      - name: os
+        type: string
+        required: true
+        description: "平台：ios 或 android"
+      - name: app_id
+        type: string
+        required: true
+        description: "应用ID（iOS 数字ID 或 Android 包名，如 553834731 / com.king.candycrushsaga）"
+      - name: countries
+        type: string
+        default: "US"
+        description: "国家代码，逗号分隔（US,GB,JP）或 WW 表示全球"
+      - name: start_date
+        type: string
+        required: true
+        description: "开始日期 YYYY-MM-DD"
+      - name: end_date
+        type: string
+        required: true
+        description: "结束日期 YYYY-MM-DD"
+      - name: date_granularity
+        type: string
+        default: "monthly"
+        description: "粒度：daily / weekly / monthly / quarterly"
+
+  - id: app_active_users
+    name: 活跃用户数
+    description: 获取 DAU / MAU 数据
+    params:
+      - name: os
+        type: string
+        required: true
+        description: "平台：ios 或 android"
+      - name: app_id
+        type: string
+        required: true
+      - name: countries
+        type: string
+        default: "US"
+      - name: start_date
+        type: string
+        required: true
+      - name: end_date
+        type: string
+        required: true
+      - name: date_granularity
+        type: string
+        default: "monthly"
+      - name: metric
+        type: string
+        default: "dau"
+        description: "指标：dau / mau"
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+  max_entries: 500
+
+skill_keywords:
+  - 下载量
+  - 收入
+  - 营收
+  - DAU
+  - MAU
+  - 活跃用户
+  - App Store
+  - Google Play
+  - 应用商店
+  - 移动应用
+  - sensortower
+  - sensor tower

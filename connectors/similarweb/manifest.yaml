@@ -1,0 +1,112 @@
+id: similarweb
+name: SimilarWeb 网站分析
+version: 1.0.0
+description: 网站流量、排名、营销渠道、受众画像等网站分析数据（API V5）
+
+credentials:
+  - key: api_key
+    label: API Key
+    required: true
+    description: "SimilarWeb API 密钥（在平台 Settings > Account > API 中生成）"
+
+actions:
+  - id: traffic_engagement
+    name: 流量与互动
+    description: 网站访问量、跳出率、平均访问时长、每次访问页面数、独立访客
+    params:
+      - name: domain
+        type: string
+        required: true
+        description: "网站域名（不含 www，如 google.com）"
+      - name: start_date
+        type: string
+        required: true
+        description: "开始日期 YYYY-MM"
+      - name: end_date
+        type: string
+        required: true
+        description: "结束日期 YYYY-MM"
+      - name: granularity
+        type: string
+        default: "monthly"
+        description: "粒度：daily / weekly / monthly"
+      - name: country
+        type: string
+        default: "world"
+        description: "国家代码（us/gb/cn）或 world 表示全球"
+
+  - id: website_ranking
+    name: 网站排名
+    description: 全球/国家/行业排名
+    params:
+      - name: domain
+        type: string
+        required: true
+        description: "网站域名"
+
+  - id: traffic_sources
+    name: 流量来源
+    description: 各营销渠道（直接/搜索/社交/引荐/邮件/展示广告）的流量占比
+    params:
+      - name: domain
+        type: string
+        required: true
+      - name: start_date
+        type: string
+        required: true
+        description: "YYYY-MM"
+      - name: end_date
+        type: string
+        required: true
+        description: "YYYY-MM"
+      - name: country
+        type: string
+        default: "world"
+
+  - id: traffic_geography
+    name: 流量地域分布
+    description: 按国家的流量占比分布
+    params:
+      - name: domain
+        type: string
+        required: true
+      - name: start_date
+        type: string
+        required: true
+      - name: end_date
+        type: string
+        required: true
+
+  - id: app_details
+    name: 应用详情
+    description: App 基本信息、评分、下载量、收入
+    params:
+      - name: app_id
+        type: string
+        required: true
+        description: "应用ID（Google Play 包名或 Apple Store ID）"
+      - name: store
+        type: string
+        default: "google"
+        description: "商店：google / apple"
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+  max_entries: 500
+
+skill_keywords:
+  - 网站流量
+  - 访问量
+  - UV
+  - PV
+  - 跳出率
+  - 排名
+  - 流量来源
+  - 营销渠道
+  - 竞品分析
+  - similarweb
+  - 网站分析
+  - 域名分析
+  - SEO
+  - 搜索流量

@@ -82,6 +82,7 @@ import { dispatchAgent } from "./lib/agent-dispatcher.js";
 import { runHooks } from "./lib/hook-engine.js";
 import { startTeam, getTeamStatus } from "./lib/agent-team.js";
 import connectorRegistry from "./lib/connector-registry.js";
+import { importCredentials, importSingleFile } from "./lib/credential-importer.js";
 
 // Initialize v2.2.0 subsystems on startup
 ensureMemoryDirs();
@@ -1320,6 +1321,30 @@ app.post("/data-bridge/connectors/:id/toggle", (req, res) => {
 app.post("/data-bridge/reload", async (_req, res) => {
   await connectorRegistry.reload();
   res.json({ ok: true, count: connectorRegistry.size, connectors: connectorRegistry.list() });
+});
+
+app.post("/data-bridge/import-credentials", (req, res) => {
+  const result = importCredentials(connectorRegistry);
+  res.json({ ok: true, ...result });
+});
+
+app.post("/data-bridge/import-file", (req, res) => {
+  const { filePath, connectorId } = req.body || {};
+  if (!filePath) return res.status(400).json({ ok: false, error: "缺少 filePath" });
+  const result = importSingleFile(filePath, connectorId, connectorRegistry);
+  res.json(result);
+});
+
+app.post("/data-bridge/connectors/create", async (req, res) => {
+  const result = await connectorRegistry.createUserConnector(req.body || {});
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.delete("/data-bridge/connectors/:id", async (req, res) => {
+  const result = await connectorRegistry.removeUserConnector(req.params.id);
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
 });
 
 // ── Skills 列表 API（调试用）─────────────────────────────────
@@ -4390,6 +4415,34 @@ app.post("/chat", async (req, res) => {
       return;
     }
 
+    // #region agent log
+    const _maxTurnsInt = parseInt(maxTurns, 10) || 5;
+    const _turnsTruncated =
+      _toolUseCount >= _maxTurnsInt && resultText.length < 200;
+    if (_turnsTruncated) {
+      fetch("http://127.0.0.1:7244/ingest/654d9aa3-fbba-48f2-b4ce-e7b9fc0ed511", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "abaffc" },
+        body: JSON.stringify({
+          sessionId: "abaffc",
+          location: "proxy-server.js:maxturns-truncation",
+          message: "Response likely truncated by maxTurns",
+          data: { maxTurns: _maxTurnsInt, toolUseCount: _toolUseCount, resultChars: resultText.length },
+          timestamp: Date.now(),
+          hypothesisId: "H1,H4",
+        }),
+      }).catch(() => {});
+      console.log(
+        `[maxturns-truncation] ⚠️ toolUseCount=${_toolUseCount} >= maxTurns=${_maxTurnsInt}, resultChars=${resultText.length} — response likely truncated`,
+      );
+      if (!res.writableEnded) {
+        res.write(
+          `data: ${JSON.stringify({ type: "token", text: "\n\n⚠️ _AI 使用了大量工具但未生成完整结果（工具轮次已耗尽），正在自动重试…_" })}\n\n`,
+        );
+      }
+    }
+    // #endregion
+
     if (code !== 0 && !resultText) {
       const stderrHint = _stderrBuf.trim().substring(0, 300);
       let userMsg = `Claude CLI 异常退出 (code=${code})`;
@@ -5073,6 +5126,10 @@ if (existsSync(distPath)) {
 
 connectorRegistry.load().then(() => {
   console.log(`[connector-registry] Ready (${connectorRegistry.size} connectors)`);
+  const importResult = importCredentials(connectorRegistry);
+  if (importResult.imported.length > 0) {
+    console.log(`[credential-importer] Auto-imported ${importResult.imported.length} credentials on startup`);
+  }
 }).catch((err) => {
   console.error("[connector-registry] Init failed:", err.message);
 });
