@@ -45,7 +45,7 @@ export async function getWpsContext(): Promise<WpsContext> {
 }
 
 const CODE_RESULT_POLL_MS = 300;
-const CODE_RESULT_TIMEOUT_MS = 30000;
+const CODE_RESULT_TIMEOUT_MS = 90000;
 
 import type { DiffResult, AddToChatPayload } from "../types";
 
@@ -117,7 +117,7 @@ export async function executeCode(
     };
   }
 
-  throw new Error("代码执行超时（30秒）");
+  throw new Error("代码执行超时（90秒）");
 }
 
 /** v2.2.0: Execute Python code via proxy */

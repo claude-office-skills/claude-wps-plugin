@@ -21,19 +21,43 @@ function sanitize(s) {
   return String(s || "").replace(/[^a-zA-Z0-9._-]/g, "");
 }
 
-async function apiFetch(path, params, apiKey) {
+async function apiFetch(path, params, apiKey, _retries = 0) {
   const qs = new URLSearchParams(params);
   const url = `${BASE}/${path}?${qs}`;
-  const resp = await fetch(url, {
-    headers: {
-      "api-key": apiKey,
-      "Accept": "application/json",
-    },
-    signal: AbortSignal.timeout(30_000),
-  });
+  let resp;
+  try {
+    resp = await fetch(url, {
+      headers: {
+        "api-key": apiKey,
+        "Accept": "application/json",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (fetchErr) {
+    if (_retries < 2) {
+      await new Promise((r) => setTimeout(r, 1500 * (_retries + 1)));
+      return apiFetch(path, params, apiKey, _retries + 1);
+    }
+    throw new Error(`SimilarWeb 网络错误 (${fetchErr.message})，请稍后重试`);
+  }
+  if (resp.status === 429 && _retries < 2) {
+    await new Promise((r) => setTimeout(r, 2000 * (_retries + 1)));
+    return apiFetch(path, params, apiKey, _retries + 1);
+  }
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
-    throw new Error(`SimilarWeb ${resp.status}: ${body.slice(0, 300)}`);
+    let errMsg = `SimilarWeb ${resp.status}`;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed?.meta?.error_message) {
+        errMsg += `: ${parsed.meta.error_message}`;
+      } else {
+        errMsg += `: ${body.slice(0, 500)}`;
+      }
+    } catch {
+      errMsg += `: ${body.slice(0, 500)}`;
+    }
+    throw new Error(errMsg);
   }
   return resp.json();
 }

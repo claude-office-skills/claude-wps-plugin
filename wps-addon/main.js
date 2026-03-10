@@ -635,7 +635,7 @@ function dataBridgePull(connectorId, action, params) {
     action: action,
     params: params || {},
   });
-  var resp = httpPost(PROXY_URL + "/data-bridge/pull", body);
+  var resp = httpPost(PROXY_URL + "/data-bridge/pull", body, 45000);
   if (!resp) return { ok: false, error: "网络请求失败" };
   try {
     return JSON.parse(resp);
@@ -655,7 +655,7 @@ function dataBridgeList() {
 }
 
 function dataBridgeSetCredentials(connectorId, credentials) {
-  var body = JSON.stringify({ credentials: credentials });
+  var body = JSON.stringify(credentials);
   var resp = httpPost(PROXY_URL + "/data-bridge/connectors/" + connectorId + "/credentials", body);
   if (!resp) return { ok: false, error: "网络请求失败" };
   try { return JSON.parse(resp); } catch (e) { return { ok: false, error: "响应解析失败" }; }
@@ -820,10 +820,11 @@ function executeInWps(code) {
 
 // ── HTTP 工具（同步 XHR）─────────────────────────────────────
 
-function httpPost(url, body) {
+function httpPost(url, body, timeout) {
   try {
     var xhr = new XMLHttpRequest();
     xhr.open("POST", url, false);
+    xhr.timeout = timeout || 20000;
     xhr.setRequestHeader("Content-Type", "application/json");
     xhr.send(body);
     return xhr.responseText;

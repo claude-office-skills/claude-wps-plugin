@@ -1647,10 +1647,6 @@ ${code}
         unexpectedErr instanceof Error
           ? unexpectedErr.message
           : String(unexpectedErr);
-      const errStack =
-        unexpectedErr instanceof Error
-          ? unexpectedErr.stack?.substring(0, 300)
-          : "";
       const isProxyError =
         errMsg.includes("fetch") ||
         errMsg.includes("Failed") ||

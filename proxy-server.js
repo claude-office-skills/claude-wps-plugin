@@ -616,25 +616,21 @@ function estimatePromptTier(userMessage, messages) {
   const HEAVY_KEYWORDS =
     /dcf|估值模型|建模|财务模型|完整.*模型|多.*sheet|多.*表|分析.*报告|敏感性分析|情景分析|scenario/i;
   if (HEAVY_KEYWORDS.test(msg) || msgLen > 300) {
-    _logTier(msg, "heavy", "HEAVY_KW");
     return "heavy";
   }
 
   const GREETING =
     /^(你好|hi|hello|hey|嗨|谢谢|thanks?|thank you|ok|好的|收到|明白|了解|知道了|嗯|对|是的|没错|不是|test|测试|你是谁|what are you|who are you)[\s!！。.？?]*$/i;
   if (GREETING.test(msg)) {
-    _logTier(msg, "light", "GREETING");
     return "light";
   }
 
   const PURE_QUESTION =
     /^(什么是|是什么|怎么用|如何使用|请问|解释一下|explain|what is|how to|为什么)/i;
   if (msgLen < 50 && PURE_QUESTION.test(msg)) {
-    _logTier(msg, "light", "PURE_Q");
     return "light";
   }
 
-  _logTier(msg, "standard", "DEFAULT");
   return "standard";
 }
 
@@ -2000,7 +1996,7 @@ app.post("/v2/plan/execute-step", async (req, res) => {
       });
       _codeResults[codeId] = undefined;
 
-      const maxWait = 30000;
+      const maxWait = 90000;
       const start = Date.now();
       const poll = setInterval(() => {
         const result = _codeResults[codeId];
@@ -2088,7 +2084,6 @@ let _codeChunkMap = {};
 app.post("/execute-code", async (req, res) => {
   const { code, agentId, force } = req.body;
   if (!code) return res.status(400).json({ error: "code 不能为空" });
-
   // v3.2: PreCodeExecute Hook — 危险操作拦截（force=true 时用户已确认，跳过）
   if (!force) {
     const preHook = runHooks("PreCodeExecute", {

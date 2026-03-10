@@ -17,14 +17,20 @@ context:
 ```javascript
 var resp = dataBridgePull("similarweb", "traffic_engagement", {
   domain: "google.com",
-  start_date: "2024-01",
-  end_date: "2024-12",
+  start_date: "2025-01",
+  end_date: "2025-12",
   granularity: "monthly",
   country: "world"
 });
 if (!resp || !resp.ok) return "获取数据失败: " + (resp ? resp.error : "网络错误");
-var d = resp.data;
-// d 包含: visits, bounce_rate, average_visit_duration, pages_per_visit, unique_visitors
+// resp.data.data 是月度数组，每个元素包含:
+//   date, visits, bounce_rate, average_visit_duration, pages_per_visit, unique_visitors
+var rows = resp.data.data; // Array: [{date:"2025-01-01", visits:723462947, ...}, ...]
+for (var i = 0; i < rows.length; i++) {
+  var r = rows[i];
+  // r.date (日期), r.visits (访问量), r.bounce_rate (跳出率 0-1),
+  // r.average_visit_duration (秒), r.pages_per_visit, r.unique_visitors
+}
 ```
 
 ### 获取网站排名
@@ -33,7 +39,9 @@ var d = resp.data;
 var resp = dataBridgePull("similarweb", "website_ranking", {
   domain: "google.com"
 });
-// 返回: 全球排名、国家排名、行业排名
+if (!resp || !resp.ok) return "获取失败: " + (resp ? resp.error : "网络错误");
+// resp.data.data 是数组: [{date, rank_global, rank_country, rank_category, ...}]
+var rank = resp.data.data[0]; // rank.rank_global, rank.rank_country
 ```
 
 ### 获取流量来源
@@ -41,8 +49,8 @@ var resp = dataBridgePull("similarweb", "website_ranking", {
 ```javascript
 var resp = dataBridgePull("similarweb", "traffic_sources", {
   domain: "google.com",
-  start_date: "2024-01",
-  end_date: "2024-12",
+  start_date: "2025-01",
+  end_date: "2025-12",
   country: "world"
 });
 // 各渠道（直接/搜索/社交/引荐/邮件/展示广告）的流量占比
@@ -53,8 +61,8 @@ var resp = dataBridgePull("similarweb", "traffic_sources", {
 ```javascript
 var resp = dataBridgePull("similarweb", "traffic_geography", {
   domain: "google.com",
-  start_date: "2024-01",
-  end_date: "2024-12"
+  start_date: "2025-01",
+  end_date: "2025-12"
 });
 // 按国家的流量占比
 ```
@@ -92,7 +100,10 @@ var resp = dataBridgePull("similarweb", "app_details", {
 ### 重要规则
 
 - **日期格式 YYYY-MM**：SimilarWeb 使用月份粒度的日期（非 YYYY-MM-DD）
+- **日期范围限制**：数据通常只覆盖最近 24 个月（约 2024-02 到 2026-02）。推荐使用 `start_date: "2025-01"`, `end_date: "2025-12"` 或 `"2026-01"` 等近期日期。**不要用超出范围的日期**。
 - **国家小写**：使用小写国家代码（`"us"` 而非 `"US"`），或 `"world"` 表示全球
 - **域名不含协议**：传入 `"google.com"` 而非 `"https://www.google.com"`
 - **检查 `resp.ok`**：必须检查返回状态
 - **API 限流**：每秒最多 10 次请求，系统已内置缓存（1 小时 TTL）
+- **⚠️ 单次代码块最多查询 3 个域名**：每个 API 调用是同步阻塞的（5-15 秒/次），超过 3 个域名会导致执行超时。多域名研究应**分批执行**（第一批 3 个 → 写入表格 → 第二批 3 个）。
+- **仅使用 `traffic_engagement` 和 `website_ranking` action**：`traffic_sources` 和 `traffic_geography` 在当前 API 计划下不可用（返回 404）。不要使用它们。
